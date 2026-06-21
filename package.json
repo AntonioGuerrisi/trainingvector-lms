@@ -1,0 +1,29 @@
+{
+  "name": "video-lms-platform",
+  "version": "0.1.0+1",
+  "private": true,
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "prepare": "node scripts/install-version-hook.mjs",
+    "dev": "concurrently -n backend,frontend -c cyan,magenta \"npm run dev -w @lms/backend\" \"npm run dev -w @lms/frontend\"",
+    "dev:backend": "npm run dev -w @lms/backend",
+    "dev:frontend": "npm run dev -w @lms/frontend",
+    "build": "npm run build --workspaces",
+    "db:push": "npm run db:push -w @lms/backend",
+    "seed": "npm run seed -w @lms/backend",
+    "version:bump": "node scripts/bump-version.mjs",
+    "version:set": "node scripts/bump-version.mjs set",
+    "version:revision": "node scripts/bump-version.mjs revision",
+    "version:feature": "node scripts/bump-version.mjs minor",
+    "version:major": "node scripts/bump-version.mjs major",
+    "version:install-hook": "node scripts/install-version-hook.mjs"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

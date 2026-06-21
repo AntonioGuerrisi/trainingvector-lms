@@ -1,0 +1,152 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  STUDENT
+  PROFESSOR
+  ADMIN
+}
+
+enum CourseStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+model User {
+  id                    String          @id @default(cuid())
+  name                  String
+  email                 String          @unique
+  passwordHash          String
+  role                  Role            @default(STUDENT)
+  createdAt             DateTime        @default(now())
+  groups                GroupMembership[]
+  coursesCreated        Course[]        @relation("CourseCreator")
+  videosCreated         Video[]         @relation("VideoCreator")
+  assignedByAssignments Assignment[]    @relation("AssignmentCreator")
+  userAssignments       Assignment[]    @relation("UserAssignments")
+  progress              VideoProgress[]
+  h5pEvents             H5PEvent[]
+}
+
+model Group {
+  id          String            @id @default(cuid())
+  name        String            @unique
+  createdAt   DateTime          @default(now())
+  members     GroupMembership[]
+  assignments Assignment[]
+}
+
+model GroupMembership {
+  userId    String
+  groupId   String
+  roleLabel String?
+  user      User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  group     Group  @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@id([userId, groupId])
+}
+
+model Course {
+  id          String          @id @default(cuid())
+  title       String
+  description String
+  status      CourseStatus    @default(DRAFT)
+  createdById String?
+  createdBy   User?           @relation("CourseCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  videos      CourseVideo[]
+  assignments Assignment[]
+  progress    VideoProgress[]
+  h5pEvents   H5PEvent[]
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+}
+
+model Video {
+  id              String          @id @default(cuid())
+  title           String
+  description     String
+  sourceUrl       String
+  mimeType        String          @default("video/mp4")
+  durationSeconds Int?
+  h5pConfig       Json?
+  createdById     String?
+  createdBy       User?           @relation("VideoCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  courses         CourseVideo[]
+  assignments     Assignment[]
+  progress        VideoProgress[]
+  h5pEvents       H5PEvent[]
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+}
+
+model CourseVideo {
+  id           String  @id @default(cuid())
+  courseId     String
+  videoId      String
+  position     Int
+  gatePrevious Boolean @default(true)
+  course       Course  @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  video        Video   @relation(fields: [videoId], references: [id], onDelete: Cascade)
+
+  @@unique([courseId, position])
+  @@unique([courseId, videoId])
+}
+
+model Assignment {
+  id           String    @id @default(cuid())
+  courseId     String?
+  videoId      String?
+  userId       String?
+  groupId      String?
+  assignedById String?
+  dueAt        DateTime?
+  notes        String?
+  course       Course?   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  video        Video?    @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  user         User?     @relation("UserAssignments", fields: [userId], references: [id], onDelete: Cascade)
+  group        Group?    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  assignedBy   User?     @relation("AssignmentCreator", fields: [assignedById], references: [id], onDelete: SetNull)
+  createdAt    DateTime  @default(now())
+}
+
+model VideoProgress {
+  id                  String    @id @default(cuid())
+  userId              String
+  videoId             String
+  courseId            String?
+  watchedSeconds      Float     @default(0)
+  lastPositionSeconds Float     @default(0)
+  percent             Float     @default(0)
+  completed           Boolean   @default(false)
+  completedAt         DateTime?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+  user                User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  video               Video     @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  course              Course?   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, videoId, courseId])
+}
+
+model H5PEvent {
+  id            String   @id @default(cuid())
+  userId        String
+  videoId       String
+  courseId      String?
+  interactionId String?
+  type          String
+  score         Float?
+  maxScore      Float?
+  payload       Json
+  occurredAt    DateTime @default(now())
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  video         Video    @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  course        Course?  @relation(fields: [courseId], references: [id], onDelete: Cascade)
+}
