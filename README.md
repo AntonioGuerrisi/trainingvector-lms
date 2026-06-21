@@ -27,6 +27,8 @@ I built this because I needed it (or just thought it would be cool), but it’s 
 docker compose up --build
 ```
 
+Docker Compose enables `SEED_DEMO_DATA=true` for the backend service, so the demo users and sample course data are created automatically on startup.
+
 Open:
 
 - Frontend: http://localhost:5173

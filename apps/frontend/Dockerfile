@@ -2,6 +2,7 @@ FROM node:20-alpine AS build
 WORKDIR /app
 
 COPY package.json package-lock.json* ./
+COPY scripts/install-version-hook.mjs scripts/install-version-hook.mjs
 COPY apps/frontend/package.json apps/frontend/package.json
 RUN npm install --workspace @lms/frontend --include-workspace-root=false
 
