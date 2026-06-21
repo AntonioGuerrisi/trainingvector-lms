@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
   Award,
@@ -11,23 +11,27 @@ import {
   Gauge,
   GraduationCap,
   Home,
+  KeyRound,
   Layers,
   ListChecks,
   Lock,
   LogOut,
+  Pencil,
   PlayCircle,
   Plus,
   RefreshCw,
   Save,
   Settings,
   ShieldCheck,
+  Trash2,
   Upload,
   UserPlus,
-  Users
+  Users,
+  X
 } from "lucide-react";
 import { api } from "./lib/api";
 import { cn, formatPercent, resolveMediaUrl } from "./lib/utils";
-import type { Course, CourseVideo, DirectoryData, DirectoryVideo, H5PInteraction, ProgressReportRow, ReportOverview, Role, User } from "./types";
+import type { Course, CourseVideo, DirectoryData, DirectoryUser, DirectoryVideo, H5PInteraction, ProgressReportRow, ReportOverview, Role, User } from "./types";
 import { Button } from "./components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./components/ui/card";
 
@@ -47,6 +51,8 @@ const demoAccounts = [
   { label: "Professor", email: "professor@lms.local", password: "professor123" },
   { label: "Student", email: "student@lms.local", password: "student123" }
 ];
+
+const roleOptions: Role[] = ["STUDENT", "PROFESSOR", "ADMIN"];
 
 function roleLabel(role: Role) {
   return role === "ADMIN" ? "Administrator" : role === "PROFESSOR" ? "Professor" : "Student";
@@ -383,7 +389,7 @@ function PageRouter({
     return <ReportsPage overview={overview} courses={courses} progressRows={progressRows} />;
   }
 
-  return <SettingsPage user={user} />;
+  return <SettingsPage token={token} user={user} onRunAction={onRunAction} />;
 }
 
 function LoginView({ onLogin, loading, toast }: { onLogin: (email: string, password: string) => Promise<void>; loading: boolean; toast: ToastState }) {
@@ -607,7 +613,124 @@ function LearningPanel({ token, course, video, onProgressSaved, onToast }: { tok
 
 function UserManagementPage({ token, directory, onRunAction }: { token: string; directory: DirectoryData; onRunAction: (action: () => Promise<unknown>, message: string) => Promise<void> }) {
   const [form, setForm] = useState({ name: "", email: "", password: "ChangeMe123", role: "STUDENT" as Role });
-  return <div className="grid gap-4 xl:grid-cols-[420px_minmax(0,1fr)]"><Card><CardHeader><CardTitle>Create user</CardTitle></CardHeader><CardContent className="space-y-3"><input className="field" placeholder="Full name" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /><input className="field" placeholder="Email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} /><input className="field" placeholder="Temporary password" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} /><select className="field" value={form.role} onChange={(event) => setForm({ ...form, role: event.target.value as Role })}><option value="STUDENT">Student</option><option value="PROFESSOR">Professor</option><option value="ADMIN">Administrator</option></select><Button onClick={() => onRunAction(() => api.createUser(token, form), "User created")}><UserPlus className="h-4 w-4" aria-hidden="true" />Create user</Button></CardContent></Card><Card><CardHeader><CardTitle>User directory</CardTitle></CardHeader><CardContent><DataTable headers={["Name", "Email", "Role"]} rows={directory.users.map((entry) => [entry.name, entry.email, roleLabel(entry.role)])} /></CardContent></Card></div>;
+  const [editingUserId, setEditingUserId] = useState("");
+  const [editForm, setEditForm] = useState({ name: "", email: "", role: "STUDENT" as Role });
+  const [resettingUserId, setResettingUserId] = useState("");
+  const [resetForm, setResetForm] = useState({ newPassword: "", confirmNewPassword: "" });
+
+  function startEditing(user: DirectoryUser) {
+    setEditingUserId(user.id);
+    setResettingUserId("");
+    setEditForm({ name: user.name, email: user.email, role: user.role });
+  }
+
+  function startPasswordReset(user: DirectoryUser) {
+    setResettingUserId(user.id);
+    setEditingUserId("");
+    setResetForm({ newPassword: "", confirmNewPassword: "" });
+  }
+
+  async function createUser() {
+    await api.createUser(token, form);
+    setForm({ name: "", email: "", password: "ChangeMe123", role: "STUDENT" });
+  }
+
+  async function saveUser() {
+    await api.updateUser(token, editingUserId, editForm);
+    setEditingUserId("");
+  }
+
+  async function resetPassword() {
+    if (resetForm.newPassword !== resetForm.confirmNewPassword) {
+      throw new Error("New password confirmation does not match");
+    }
+
+    await api.resetUserPassword(token, resettingUserId, resetForm);
+    setResettingUserId("");
+    setResetForm({ newPassword: "", confirmNewPassword: "" });
+  }
+
+  async function deleteUser(user: DirectoryUser) {
+    if (!window.confirm(`Delete ${user.name}?`)) {
+      return;
+    }
+
+    await onRunAction(async () => {
+      await api.deleteUser(token, user.id);
+      if (editingUserId === user.id) {
+        setEditingUserId("");
+      }
+      if (resettingUserId === user.id) {
+        setResettingUserId("");
+      }
+    }, "User deleted");
+  }
+
+  return (
+    <div className="grid gap-4 xl:grid-cols-[420px_minmax(0,1fr)]">
+      <Card>
+        <CardHeader><CardTitle>Create user</CardTitle></CardHeader>
+        <CardContent className="space-y-3">
+          <input className="field" placeholder="Full name" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} />
+          <input className="field" placeholder="Email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} />
+          <input className="field" placeholder="Temporary password" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} />
+          <select className="field" value={form.role} onChange={(event) => setForm({ ...form, role: event.target.value as Role })}>
+            {roleOptions.map((role) => <option key={role} value={role}>{roleLabel(role)}</option>)}
+          </select>
+          <Button onClick={() => onRunAction(createUser, "User created")}>
+            <UserPlus className="h-4 w-4" aria-hidden="true" />Create user
+          </Button>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader><CardTitle>User directory</CardTitle></CardHeader>
+        <CardContent>
+          <DataTable
+            headers={["Name", "Email", "Role", "Actions"]}
+            rows={directory.users.map((entry) => {
+              const isEditing = editingUserId === entry.id;
+              const isResetting = resettingUserId === entry.id;
+
+              return [
+                isEditing ? <input className="field min-w-44" value={editForm.name} onChange={(event) => setEditForm({ ...editForm, name: event.target.value })} /> : <span className="font-medium">{entry.name}</span>,
+                isResetting ? <input className="field min-w-52" type="password" placeholder="New password" value={resetForm.newPassword} onChange={(event) => setResetForm({ ...resetForm, newPassword: event.target.value })} /> : isEditing ? <input className="field min-w-56" type="email" value={editForm.email} onChange={(event) => setEditForm({ ...editForm, email: event.target.value })} /> : entry.email,
+                isResetting ? <input className="field min-w-52" type="password" placeholder="Confirm password" value={resetForm.confirmNewPassword} onChange={(event) => setResetForm({ ...resetForm, confirmNewPassword: event.target.value })} /> : isEditing ? (
+                  <select className="field min-w-44" value={editForm.role} onChange={(event) => setEditForm({ ...editForm, role: event.target.value as Role })}>
+                    {roleOptions.map((role) => <option key={role} value={role}>{roleLabel(role)}</option>)}
+                  </select>
+                ) : roleLabel(entry.role),
+                <div className="flex items-center gap-2">
+                  {isEditing || isResetting ? (
+                    <>
+                      <Button size="icon" variant="default" title={isResetting ? "Reset password" : "Save user"} aria-label={isResetting ? "Reset password" : "Save user"} onClick={() => onRunAction(isResetting ? resetPassword : saveUser, isResetting ? "Password reset" : "User updated")}>
+                        <Save className="h-4 w-4" aria-hidden="true" />
+                      </Button>
+                      <Button size="icon" variant="ghost" title="Cancel" aria-label="Cancel" onClick={() => { setEditingUserId(""); setResettingUserId(""); }}>
+                        <X className="h-4 w-4" aria-hidden="true" />
+                      </Button>
+                    </>
+                  ) : (
+                    <>
+                      <Button size="icon" variant="outline" title="Edit user" aria-label="Edit user" onClick={() => startEditing(entry)}>
+                        <Pencil className="h-4 w-4" aria-hidden="true" />
+                      </Button>
+                      <Button size="icon" variant="outline" title="Reset password" aria-label="Reset password" onClick={() => startPasswordReset(entry)}>
+                        <KeyRound className="h-4 w-4" aria-hidden="true" />
+                      </Button>
+                      <Button size="icon" variant="destructive" title="Delete user" aria-label="Delete user" onClick={() => void deleteUser(entry)}>
+                        <Trash2 className="h-4 w-4" aria-hidden="true" />
+                      </Button>
+                    </>
+                  )}
+                </div>
+              ];
+            })}
+          />
+        </CardContent>
+      </Card>
+    </div>
+  );
 }
 
 function VideoUploadPage({ token, directory, onRunAction }: { token: string; directory: DirectoryData; onRunAction: (action: () => Promise<unknown>, message: string) => Promise<void> }) {
@@ -655,8 +778,51 @@ function ReportsPage({ overview, courses, progressRows }: { overview: ReportOver
   return <div className="space-y-5"><MetricGrid metrics={metrics} /><div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]"><Card><CardHeader><CardTitle>Course completion</CardTitle></CardHeader><CardContent className="space-y-3">{courses.map((course) => <CourseProgressRow key={course.id} course={course} />)}</CardContent></Card><Card><CardHeader><CardTitle>Recent activity</CardTitle></CardHeader><CardContent className="space-y-2">{progressRows.slice(0, 8).map((row) => <CompactItem key={row.id} title={row.user.name} detail={`${row.video.title} - ${formatPercent(row.percent)}`} />)}</CardContent></Card></div></div>;
 }
 
-function SettingsPage({ user }: { user: User }) {
-  return <div className="grid gap-4 lg:grid-cols-2"><Card><CardHeader><CardTitle>Account</CardTitle></CardHeader><CardContent className="space-y-3"><CompactItem title="Name" detail={user.name} /><CompactItem title="Email" detail={user.email} /><CompactItem title="Role" detail={roleLabel(user.role)} /></CardContent></Card><Card><CardHeader><CardTitle>Platform settings</CardTitle></CardHeader><CardContent className="space-y-3"><CompactItem title="API endpoint" detail={import.meta.env.VITE_API_URL ?? "http://localhost:4000"} /><CompactItem title="Demo data" detail="Docker Compose seeds demo users when SEED_DEMO_DATA is enabled." /><CompactItem title="Versioning" detail="Application version is managed through VERSION and npm scripts." /></CardContent></Card></div>;
+function SettingsPage({ token, user, onRunAction }: { token: string; user: User; onRunAction: (action: () => Promise<unknown>, message: string) => Promise<void> }) {
+  const [passwordForm, setPasswordForm] = useState({ currentPassword: "", newPassword: "", confirmNewPassword: "" });
+
+  async function changePassword() {
+    if (passwordForm.newPassword !== passwordForm.confirmNewPassword) {
+      throw new Error("New password confirmation does not match");
+    }
+
+    await api.changePassword(token, passwordForm);
+    setPasswordForm({ currentPassword: "", newPassword: "", confirmNewPassword: "" });
+  }
+
+  return (
+    <div className="grid gap-4 lg:grid-cols-2">
+      <Card>
+        <CardHeader><CardTitle>Account</CardTitle></CardHeader>
+        <CardContent className="space-y-3">
+          <CompactItem title="Name" detail={user.name} />
+          <CompactItem title="Email" detail={user.email} />
+          <CompactItem title="Role" detail={roleLabel(user.role)} />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader><CardTitle>Password</CardTitle></CardHeader>
+        <CardContent className="space-y-3">
+          <input className="field" type="password" placeholder="Current password" value={passwordForm.currentPassword} onChange={(event) => setPasswordForm({ ...passwordForm, currentPassword: event.target.value })} />
+          <input className="field" type="password" placeholder="New password" value={passwordForm.newPassword} onChange={(event) => setPasswordForm({ ...passwordForm, newPassword: event.target.value })} />
+          <input className="field" type="password" placeholder="Confirm new password" value={passwordForm.confirmNewPassword} onChange={(event) => setPasswordForm({ ...passwordForm, confirmNewPassword: event.target.value })} />
+          <Button onClick={() => onRunAction(changePassword, "Password changed")}>
+            <KeyRound className="h-4 w-4" aria-hidden="true" />Change password
+          </Button>
+        </CardContent>
+      </Card>
+
+      <Card className="lg:col-span-2">
+        <CardHeader><CardTitle>Platform settings</CardTitle></CardHeader>
+        <CardContent className="grid gap-3 md:grid-cols-3">
+          <CompactItem title="API endpoint" detail={import.meta.env.VITE_API_URL ?? "http://localhost:4000"} />
+          <CompactItem title="Demo data" detail="Docker Compose seeds demo users when SEED_DEMO_DATA is enabled." />
+          <CompactItem title="Versioning" detail="Application version is managed through VERSION and npm scripts." />
+        </CardContent>
+      </Card>
+    </div>
+  );
 }
 
 function MetricGrid({ metrics }: { metrics: Array<{ label: string; value: string | number; icon: IconComponent }> }) {
@@ -671,8 +837,8 @@ function CompactItem({ title, detail }: { title: string; detail: string }) {
   return <div className="rounded-md border bg-white px-3 py-2"><p className="truncate text-sm font-semibold">{title}</p><p className="truncate text-xs text-muted-foreground">{detail}</p></div>;
 }
 
-function DataTable({ headers, rows }: { headers: string[]; rows: Array<Array<string | number>> }) {
-  return <div className="overflow-x-auto rounded-md border"><table className="w-full min-w-[560px] text-left text-sm"><thead className="bg-muted text-xs uppercase text-muted-foreground"><tr>{headers.map((header) => <th key={header} className="px-3 py-2">{header}</th>)}</tr></thead><tbody className="divide-y bg-white">{rows.map((row, index) => <tr key={`${row.join("-")}-${index}`}>{row.map((cell, cellIndex) => <td key={`${cell}-${cellIndex}`} className="px-3 py-2">{cell}</td>)}</tr>)}</tbody></table></div>;
+function DataTable({ headers, rows }: { headers: string[]; rows: ReactNode[][] }) {
+  return <div className="overflow-x-auto rounded-md border"><table className="w-full min-w-[760px] text-left text-sm"><thead className="bg-muted text-xs uppercase text-muted-foreground"><tr>{headers.map((header) => <th key={header} className="px-3 py-2">{header}</th>)}</tr></thead><tbody className="divide-y bg-white">{rows.map((row, rowIndex) => <tr key={rowIndex}>{row.map((cell, cellIndex) => <td key={cellIndex} className="px-3 py-2 align-middle">{cell}</td>)}</tr>)}</tbody></table></div>;
 }
 
 function ProgressTable({ rows }: { rows: ProgressReportRow[] }) {

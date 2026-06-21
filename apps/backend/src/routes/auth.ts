@@ -1,4 +1,5 @@
 import { Router } from "express";
+import bcrypt from "bcryptjs";
 import { z } from "zod";
 import { signToken, verifyPassword } from "../lib/auth.js";
 import { asyncHandler, HttpError } from "../lib/http.js";
@@ -10,6 +11,15 @@ const router = Router();
 const loginSchema = z.object({
   email: z.string().email(),
   password: z.string().min(1)
+});
+
+const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1),
+  newPassword: z.string().min(8),
+  confirmNewPassword: z.string().min(8)
+}).refine((input) => input.newPassword === input.confirmNewPassword, {
+  message: "New password confirmation does not match",
+  path: ["confirmNewPassword"]
 });
 
 router.post(
@@ -32,6 +42,31 @@ router.get(
   authenticate,
   asyncHandler<AuthedRequest>(async (req, res) => {
     res.json({ user: req.user });
+  })
+);
+
+router.put(
+  "/password",
+  authenticate,
+  asyncHandler<AuthedRequest>(async (req, res) => {
+    const input = changePasswordSchema.parse(req.body);
+    const user = await prisma.user.findUnique({ where: { id: req.user.id } });
+
+    if (!user || !(await verifyPassword(input.currentPassword, user.passwordHash))) {
+      throw new HttpError(401, "Current password is incorrect");
+    }
+
+    if (await verifyPassword(input.newPassword, user.passwordHash)) {
+      throw new HttpError(400, "New password must be different from the current password");
+    }
+
+    const passwordHash = await bcrypt.hash(input.newPassword, 10);
+    await prisma.user.update({
+      where: { id: req.user.id },
+      data: { passwordHash }
+    });
+
+    res.json({ changed: true });
   })
 );
 

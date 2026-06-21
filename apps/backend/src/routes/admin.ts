@@ -48,6 +48,28 @@ const createUserSchema = z.object({
   role: z.nativeEnum(Role)
 });
 
+const updateUserSchema = z.object({
+  name: z.string().min(2),
+  email: z.string().email(),
+  role: z.nativeEnum(Role)
+});
+
+const resetUserPasswordSchema = z.object({
+  newPassword: z.string().min(8),
+  confirmNewPassword: z.string().min(8)
+}).refine((input) => input.newPassword === input.confirmNewPassword, {
+  message: "New password confirmation does not match",
+  path: ["confirmNewPassword"]
+});
+
+const managedUserSelect = {
+  id: true,
+  name: true,
+  email: true,
+  role: true,
+  createdAt: true
+} satisfies Prisma.UserSelect;
+
 const createGroupSchema = z.object({
   name: z.string().min(2)
 });
@@ -90,11 +112,125 @@ router.post(
         passwordHash,
         role: input.role
       },
-      select: { id: true, name: true, email: true, role: true, createdAt: true }
+      select: managedUserSelect
     });
 
     await invalidateReports();
     res.status(201).json({ user });
+  })
+);
+
+router.put(
+  "/users/:userId",
+  authorize(Role.ADMIN),
+  asyncHandler<AuthedRequest>(async (req, res) => {
+    const input = updateUserSchema.parse(req.body);
+    const { userId } = req.params;
+
+    const existingUser = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, role: true }
+    });
+
+    if (!existingUser) {
+      throw new HttpError(404, "User not found");
+    }
+
+    if (userId === req.user.id && input.role !== Role.ADMIN) {
+      throw new HttpError(400, "Administrators cannot change their own role");
+    }
+
+    if (existingUser.role === Role.ADMIN && input.role !== Role.ADMIN) {
+      const adminCount = await prisma.user.count({ where: { role: Role.ADMIN } });
+      if (adminCount <= 1) {
+        throw new HttpError(400, "At least one administrator account must remain");
+      }
+    }
+
+    const emailConflict = await prisma.user.findFirst({
+      where: { email: input.email, id: { not: userId } },
+      select: { id: true }
+    });
+
+    if (emailConflict) {
+      throw new HttpError(409, "Email is already assigned to another user");
+    }
+
+    const user = await prisma.user.update({
+      where: { id: userId },
+      data: {
+        name: input.name,
+        email: input.email,
+        role: input.role
+      },
+      select: managedUserSelect
+    });
+
+    await invalidateReports();
+    res.json({ user });
+  })
+);
+
+router.delete(
+  "/users/:userId",
+  authorize(Role.ADMIN),
+  asyncHandler<AuthedRequest>(async (req, res) => {
+    const { userId } = req.params;
+
+    if (userId === req.user.id) {
+      throw new HttpError(400, "Administrators cannot delete their own account");
+    }
+
+    const existingUser = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, role: true }
+    });
+
+    if (!existingUser) {
+      throw new HttpError(404, "User not found");
+    }
+
+    if (existingUser.role === Role.ADMIN) {
+      const adminCount = await prisma.user.count({ where: { role: Role.ADMIN } });
+      if (adminCount <= 1) {
+        throw new HttpError(400, "At least one administrator account must remain");
+      }
+    }
+
+    const deletedUser = await prisma.user.delete({
+      where: { id: userId },
+      select: { id: true }
+    });
+
+    await invalidateReports();
+    res.json({ deletedUserId: deletedUser.id });
+  })
+);
+
+router.put(
+  "/users/:userId/password",
+  authorize(Role.ADMIN),
+  asyncHandler(async (req, res) => {
+    const input = resetUserPasswordSchema.parse(req.body);
+    const { userId } = req.params;
+
+    const existingUser = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true }
+    });
+
+    if (!existingUser) {
+      throw new HttpError(404, "User not found");
+    }
+
+    const passwordHash = await bcrypt.hash(input.newPassword, 10);
+    const user = await prisma.user.update({
+      where: { id: userId },
+      data: { passwordHash },
+      select: managedUserSelect
+    });
+
+    res.json({ user });
   })
 );
 

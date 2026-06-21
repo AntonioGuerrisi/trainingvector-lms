@@ -3,7 +3,7 @@ apps/frontend/dist
 apps/backend/dist
 apps/backend/uploads
 prototype.md
-
+copilot-instructions.md
 
 # Created by https://www.toptal.com/developers/gitignore/api/node,database,redis,visualstudiocode,certificates
 # Edit at https://www.toptal.com/developers/gitignore?templates=node,database,redis,visualstudiocode,certificates

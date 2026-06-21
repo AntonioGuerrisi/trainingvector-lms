@@ -44,6 +44,13 @@ export const api = {
   me(token: string) {
     return request<{ user: User }>("/api/auth/me", { token });
   },
+  changePassword(token: string, payload: { currentPassword: string; newPassword: string; confirmNewPassword: string }) {
+    return request<{ changed: boolean }>("/api/auth/password", {
+      method: "PUT",
+      token,
+      body: payload
+    });
+  },
   courses(token: string) {
     return request<{ courses: Course[] }>("/api/courses", { token });
   },
@@ -85,6 +92,26 @@ export const api = {
   createUser(token: string, payload: { name: string; email: string; password: string; role: Role }) {
     return request<{ user: User }>("/api/admin/users", {
       method: "POST",
+      token,
+      body: payload
+    });
+  },
+  updateUser(token: string, userId: string, payload: { name: string; email: string; role: Role }) {
+    return request<{ user: User }>(`/api/admin/users/${userId}`, {
+      method: "PUT",
+      token,
+      body: payload
+    });
+  },
+  deleteUser(token: string, userId: string) {
+    return request<{ deletedUserId: string }>(`/api/admin/users/${userId}`, {
+      method: "DELETE",
+      token
+    });
+  },
+  resetUserPassword(token: string, userId: string, payload: { newPassword: string; confirmNewPassword: string }) {
+    return request<{ user: User }>(`/api/admin/users/${userId}/password`, {
+      method: "PUT",
       token,
       body: payload
     });
