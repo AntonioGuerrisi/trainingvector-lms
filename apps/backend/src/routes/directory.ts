@@ -13,8 +13,14 @@ router.get(
   asyncHandler(async (_req, res) => {
     const [users, groups, videos] = await Promise.all([
       prisma.user.findMany({ select: { id: true, name: true, email: true, role: true }, orderBy: { name: "asc" } }),
-      prisma.group.findMany({ include: { members: { include: { user: { select: { id: true, name: true, email: true } } } } } }),
-      prisma.video.findMany({ select: { id: true, title: true, description: true, sourceUrl: true }, orderBy: { createdAt: "desc" } })
+      prisma.group.findMany({
+        orderBy: { name: "asc" },
+        include: { members: { include: { user: { select: { id: true, name: true, email: true } } } } }
+      }),
+      prisma.video.findMany({
+        select: { id: true, title: true, description: true, sourceUrl: true, durationSeconds: true, h5pConfig: true, createdAt: true },
+        orderBy: { createdAt: "desc" }
+      })
     ]);
 
     res.json({ users, groups, videos });

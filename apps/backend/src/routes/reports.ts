@@ -58,4 +58,20 @@ router.get(
   })
 );
 
+router.get(
+  "/progress",
+  asyncHandler<AuthedRequest>(async (_req, res) => {
+    const progress = await prisma.videoProgress.findMany({
+      include: {
+        user: { select: { id: true, name: true, email: true } },
+        video: { select: { id: true, title: true } },
+        course: { select: { id: true, title: true } }
+      },
+      orderBy: { updatedAt: "desc" }
+    });
+
+    res.json({ progress });
+  })
+);
+
 export { router as reportsRouter };

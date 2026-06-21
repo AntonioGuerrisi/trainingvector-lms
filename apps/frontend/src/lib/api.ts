@@ -1,4 +1,4 @@
-import type { Course, DirectoryData, ReportOverview, User } from "../types";
+import type { Course, CourseProgressReport, DirectoryData, H5PConfig, ProgressReportRow, ReportOverview, Role, User } from "../types";
 
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:4000";
 
@@ -73,8 +73,35 @@ export const api = {
   overview(token: string) {
     return request<{ overview: ReportOverview }>("/api/reports/overview", { token });
   },
+  courseReport(token: string, courseId: string) {
+    return request<CourseProgressReport>(`/api/reports/courses/${courseId}`, { token });
+  },
+  progressReport(token: string) {
+    return request<{ progress: ProgressReportRow[] }>("/api/reports/progress", { token });
+  },
   directory(token: string) {
     return request<DirectoryData>("/api/directory", { token });
+  },
+  createUser(token: string, payload: { name: string; email: string; password: string; role: Role }) {
+    return request<{ user: User }>("/api/admin/users", {
+      method: "POST",
+      token,
+      body: payload
+    });
+  },
+  createGroup(token: string, payload: { name: string }) {
+    return request<{ group: unknown }>("/api/admin/groups", {
+      method: "POST",
+      token,
+      body: payload
+    });
+  },
+  addGroupMember(token: string, groupId: string, payload: { userId: string; roleLabel?: string }) {
+    return request<{ membership: unknown }>(`/api/admin/groups/${groupId}/members`, {
+      method: "POST",
+      token,
+      body: payload
+    });
   },
   createCourse(token: string, payload: { title: string; description: string; status: "DRAFT" | "PUBLISHED" | "ARCHIVED" }) {
     return request<{ course: unknown }>("/api/admin/courses", {
@@ -105,6 +132,13 @@ export const api = {
       method: "POST",
       token,
       body: formData
+    });
+  },
+  updateVideoH5P(token: string, videoId: string, payload: H5PConfig) {
+    return request<{ video: unknown }>(`/api/admin/videos/${videoId}/h5p`, {
+      method: "PUT",
+      token,
+      body: payload
     });
   }
 };

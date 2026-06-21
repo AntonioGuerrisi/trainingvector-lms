@@ -50,6 +50,10 @@ export type Course = {
   videos: CourseVideo[];
 };
 
+export type ManagedUser = User & {
+  createdAt?: string;
+};
+
 export type ReportOverview = {
   courses: number;
   videos: number;
@@ -72,10 +76,42 @@ export type DirectoryVideo = {
   title: string;
   description: string;
   sourceUrl: string;
+  durationSeconds?: number;
+  h5pConfig?: H5PConfig;
+  createdAt?: string;
 };
 
 export type DirectoryData = {
   users: DirectoryUser[];
   groups: DirectoryGroup[];
   videos: DirectoryVideo[];
+};
+
+export type CourseProgressReport = {
+  course: {
+    id: string;
+    title: string;
+    description: string;
+    videos: Array<{ id: string; position: number; video: DirectoryVideo }>;
+  };
+  progress: Array<{
+    id: string;
+    percent: number;
+    completed: boolean;
+    completedAt?: string | null;
+    updatedAt: string;
+    user: Pick<User, "id" | "name" | "email">;
+    video: Pick<DirectoryVideo, "id" | "title">;
+  }>;
+};
+
+export type ProgressReportRow = {
+  id: string;
+  percent: number;
+  completed: boolean;
+  completedAt?: string | null;
+  updatedAt: string;
+  user: Pick<User, "id" | "name" | "email">;
+  video: Pick<DirectoryVideo, "id" | "title">;
+  course?: Pick<Course, "id" | "title"> | null;
 };

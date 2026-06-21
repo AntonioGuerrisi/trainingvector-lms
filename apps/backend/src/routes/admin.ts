@@ -2,7 +2,8 @@ import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { Router } from "express";
 import multer from "multer";
-import { CourseStatus, Role } from "@prisma/client";
+import bcrypt from "bcryptjs";
+import { CourseStatus, Prisma, Role } from "@prisma/client";
 import { z } from "zod";
 import { env } from "../config/env.js";
 import { asyncHandler, HttpError } from "../lib/http.js";
@@ -40,6 +41,34 @@ const createCourseSchema = z.object({
   status: z.nativeEnum(CourseStatus).default(CourseStatus.DRAFT)
 });
 
+const createUserSchema = z.object({
+  name: z.string().min(2),
+  email: z.string().email(),
+  password: z.string().min(8),
+  role: z.nativeEnum(Role)
+});
+
+const createGroupSchema = z.object({
+  name: z.string().min(2)
+});
+
+const addGroupMemberSchema = z.object({
+  userId: z.string().min(1),
+  roleLabel: z.string().optional()
+});
+
+const h5pInteractionSchema = z.object({
+  id: z.string().min(1),
+  time: z.number().min(0),
+  type: z.string().min(1).default("popup"),
+  title: z.string().min(1),
+  prompt: z.string().min(1)
+});
+
+const h5pConfigSchema = z.object({
+  interactions: z.array(h5pInteractionSchema).default([])
+});
+
 const attachVideoSchema = z.object({
   videoId: z.string().min(1),
   position: z.number().int().positive(),
@@ -47,6 +76,59 @@ const attachVideoSchema = z.object({
 });
 
 router.use(authenticate);
+
+router.post(
+  "/users",
+  authorize(Role.ADMIN),
+  asyncHandler(async (req, res) => {
+    const input = createUserSchema.parse(req.body);
+    const passwordHash = await bcrypt.hash(input.password, 10);
+    const user = await prisma.user.create({
+      data: {
+        name: input.name,
+        email: input.email,
+        passwordHash,
+        role: input.role
+      },
+      select: { id: true, name: true, email: true, role: true, createdAt: true }
+    });
+
+    await invalidateReports();
+    res.status(201).json({ user });
+  })
+);
+
+router.post(
+  "/groups",
+  authorize(Role.PROFESSOR, Role.ADMIN),
+  asyncHandler(async (req, res) => {
+    const input = createGroupSchema.parse(req.body);
+    const group = await prisma.group.create({ data: { name: input.name } });
+
+    await invalidateReports();
+    res.status(201).json({ group });
+  })
+);
+
+router.post(
+  "/groups/:groupId/members",
+  authorize(Role.PROFESSOR, Role.ADMIN),
+  asyncHandler(async (req, res) => {
+    const input = addGroupMemberSchema.parse(req.body);
+    const membership = await prisma.groupMembership.upsert({
+      where: { userId_groupId: { userId: input.userId, groupId: req.params.groupId } },
+      update: { roleLabel: input.roleLabel },
+      create: {
+        userId: input.userId,
+        groupId: req.params.groupId,
+        roleLabel: input.roleLabel
+      }
+    });
+
+    await invalidateReports();
+    res.status(201).json({ membership });
+  })
+);
 
 router.post(
   "/videos/upload",
@@ -72,6 +154,21 @@ router.post(
 
     await invalidateReports();
     res.status(201).json({ video });
+  })
+);
+
+router.put(
+  "/videos/:videoId/h5p",
+  authorize(Role.ADMIN),
+  asyncHandler(async (req, res) => {
+    const input = h5pConfigSchema.parse(req.body);
+    const video = await prisma.video.update({
+      where: { id: req.params.videoId },
+      data: { h5pConfig: input as Prisma.InputJsonValue }
+    });
+
+    await invalidateReports();
+    res.json({ video });
   })
 );
 
