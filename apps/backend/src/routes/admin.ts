@@ -1,4 +1,5 @@
 import { mkdirSync } from "node:fs";
+import { unlink } from "node:fs/promises";
 import path from "node:path";
 import { Router } from "express";
 import multer from "multer";
@@ -91,11 +92,30 @@ const h5pConfigSchema = z.object({
   interactions: z.array(h5pInteractionSchema).default([])
 });
 
+const updateVideoSchema = z.object({
+  title: z.string().min(1),
+  description: z.string().default(""),
+  durationSeconds: z.number().int().positive().nullable().optional(),
+  h5pConfig: h5pConfigSchema.default({ interactions: [] })
+});
+
+const deleteVideosSchema = z.object({
+  videoIds: z.array(z.string().min(1)).min(1).max(100)
+});
+
 const attachVideoSchema = z.object({
   videoId: z.string().min(1),
   position: z.number().int().positive(),
   gatePrevious: z.boolean().default(true)
 });
+
+async function removeUploadedVideoFile(sourceUrl: string) {
+  if (!sourceUrl.startsWith("/uploads/")) {
+    return;
+  }
+
+  await unlink(path.join(env.UPLOAD_DIR, path.basename(sourceUrl))).catch(() => undefined);
+}
 
 router.use(authenticate);
 
@@ -268,7 +288,7 @@ router.post(
 
 router.post(
   "/videos/upload",
-  authorize(Role.ADMIN),
+  authorize(Role.PROFESSOR, Role.ADMIN),
   upload.single("video"),
   asyncHandler<AuthedRequest>(async (req, res) => {
     if (!req.file) {
@@ -294,8 +314,60 @@ router.post(
 );
 
 router.put(
+  "/videos/:videoId",
+  authorize(Role.PROFESSOR, Role.ADMIN),
+  asyncHandler(async (req, res) => {
+    const input = updateVideoSchema.parse(req.body);
+    const existingVideo = await prisma.video.findUnique({
+      where: { id: req.params.videoId },
+      select: { id: true }
+    });
+
+    if (!existingVideo) {
+      throw new HttpError(404, "Video not found");
+    }
+
+    const video = await prisma.video.update({
+      where: { id: req.params.videoId },
+      data: {
+        title: input.title,
+        description: input.description,
+        durationSeconds: input.durationSeconds,
+        h5pConfig: input.h5pConfig as Prisma.InputJsonValue
+      }
+    });
+
+    await invalidateReports();
+    res.json({ video });
+  })
+);
+
+router.delete(
+  "/videos",
+  authorize(Role.PROFESSOR, Role.ADMIN),
+  asyncHandler(async (req, res) => {
+    const input = deleteVideosSchema.parse(req.body);
+    const videos = await prisma.video.findMany({
+      where: { id: { in: input.videoIds } },
+      select: { id: true, sourceUrl: true }
+    });
+
+    if (videos.length === 0) {
+      throw new HttpError(404, "No videos found");
+    }
+
+    const deletedVideoIds = videos.map((video) => video.id);
+    await prisma.video.deleteMany({ where: { id: { in: deletedVideoIds } } });
+    await Promise.all(videos.map((video) => removeUploadedVideoFile(video.sourceUrl)));
+
+    await invalidateReports();
+    res.json({ deletedVideoIds });
+  })
+);
+
+router.put(
   "/videos/:videoId/h5p",
-  authorize(Role.ADMIN),
+  authorize(Role.PROFESSOR, Role.ADMIN),
   asyncHandler(async (req, res) => {
     const input = h5pConfigSchema.parse(req.body);
     const video = await prisma.video.update({

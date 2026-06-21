@@ -1,4 +1,4 @@
-import type { Course, CourseProgressReport, DirectoryData, H5PConfig, ProgressReportRow, ReportOverview, Role, User } from "../types";
+import type { Course, CourseProgressReport, DirectoryData, DirectoryVideo, H5PConfig, ProgressReportRow, ReportOverview, Role, User } from "../types";
 
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:4000";
 
@@ -159,6 +159,20 @@ export const api = {
       method: "POST",
       token,
       body: formData
+    });
+  },
+  updateVideo(token: string, videoId: string, payload: { title: string; description: string; durationSeconds?: number | null; h5pConfig: H5PConfig }) {
+    return request<{ video: DirectoryVideo }>(`/api/admin/videos/${videoId}`, {
+      method: "PUT",
+      token,
+      body: payload
+    });
+  },
+  deleteVideos(token: string, videoIds: string[]) {
+    return request<{ deletedVideoIds: string[] }>("/api/admin/videos", {
+      method: "DELETE",
+      token,
+      body: { videoIds }
     });
   },
   updateVideoH5P(token: string, videoId: string, payload: H5PConfig) {

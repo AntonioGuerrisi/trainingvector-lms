@@ -37,7 +37,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "./components/ui/card";
 
 type ToastState = { type: "success" | "error"; message: string } | null;
 type ProgressSavedHandler = () => void | Promise<void>;
-type PageId = "dashboard" | "catalog" | "videos" | "learning" | "users" | "upload" | "h5p" | "groups" | "courses" | "progress" | "reports" | "settings";
+type PageId = "dashboard" | "catalog" | "videos" | "learning" | "users" | "groups" | "courses" | "progress" | "reports" | "settings";
 type IconComponent = typeof Home;
 
 type NavItem = {
@@ -79,8 +79,7 @@ function navigationForRole(role: Role): NavItem[] {
       { id: "groups", label: "Groups", description: "Learner cohorts", icon: Users },
       { id: "courses", label: "Courses", description: "Build paths", icon: Layers },
       { id: "progress", label: "Certification", description: "Review progress", icon: Award },
-      { id: "upload", label: "Video upload", description: "Add MP4 assets", icon: Upload },
-      { id: "h5p", label: "H5P controls", description: "Checks and popups", icon: ListChecks },
+      { id: "videos", label: "Videos", description: "Library and H5P", icon: FileVideo },
       { id: "reports", label: "Reports", description: "Usage analytics", icon: BarChart3 },
       { id: "settings", label: "Settings", description: "Platform status", icon: Settings }
     ];
@@ -90,6 +89,7 @@ function navigationForRole(role: Role): NavItem[] {
     return [
       { id: "dashboard", label: "Dashboard", description: "Teaching overview", icon: Home },
       { id: "groups", label: "Groups", description: "Learner cohorts", icon: Users },
+      { id: "videos", label: "Videos", description: "Library and H5P", icon: FileVideo },
       { id: "courses", label: "Courses", description: "Build paths", icon: Layers },
       { id: "progress", label: "Certification", description: "Review progress", icon: Award },
       { id: "reports", label: "Reports", description: "Course analytics", icon: BarChart3 },
@@ -363,7 +363,11 @@ function PageRouter({
   }
 
   if (activePage === "videos") {
-    return <StudentVideosPage courses={courses.filter(isStandaloneCourse)} onSelectLearning={onSelectLearning} />;
+    if (user.role === "STUDENT") {
+      return <StudentVideosPage courses={courses.filter(isStandaloneCourse)} onSelectLearning={onSelectLearning} />;
+    }
+
+    return directory ? <VideoManagementPage token={token} directory={directory} onRunAction={onRunAction} /> : <EmptyState title="Video library unavailable" description="Refresh the workspace or sign in with a staff account." />;
   }
 
   if (activePage === "learning") {
@@ -380,14 +384,6 @@ function PageRouter({
 
   if (activePage === "users" && directory) {
     return <UserManagementPage token={token} directory={directory} onRunAction={onRunAction} />;
-  }
-
-  if (activePage === "upload" && directory) {
-    return <VideoUploadPage token={token} directory={directory} onRunAction={onRunAction} />;
-  }
-
-  if (activePage === "h5p" && directory) {
-    return <H5PManagementPage token={token} directory={directory} onRunAction={onRunAction} />;
   }
 
   if (activePage === "groups" && directory) {
@@ -857,6 +853,172 @@ function UserManagementPage({ token, directory, onRunAction }: { token: string; 
           />
         </CardContent>
       </Card>
+    </div>
+  );
+}
+
+function VideoManagementPage({ token, directory, onRunAction }: { token: string; directory: DirectoryData; onRunAction: (action: () => Promise<unknown>, message: string) => Promise<void> }) {
+  const [form, setForm] = useState({ title: "", description: "", popupTime: "15", popupTitle: "Check", popupPrompt: "Do you confirm that you understood the content?" });
+  const [file, setFile] = useState<File | null>(null);
+  const [selectedVideoId, setSelectedVideoId] = useState(directory.videos[0]?.id ?? "");
+  const [selectedVideoIds, setSelectedVideoIds] = useState<Set<string>>(new Set());
+  const selectedVideo = directory.videos.find((video) => video.id === selectedVideoId) ?? directory.videos[0];
+
+  useEffect(() => {
+    setSelectedVideoId((current) => (current && directory.videos.some((video) => video.id === current) ? current : directory.videos[0]?.id ?? ""));
+    setSelectedVideoIds((current) => new Set([...current].filter((videoId) => directory.videos.some((video) => video.id === videoId))));
+  }, [directory.videos]);
+
+  function toggleVideoSelection(videoId: string) {
+    setSelectedVideoIds((current) => {
+      const next = new Set(current);
+      if (next.has(videoId)) {
+        next.delete(videoId);
+      } else {
+        next.add(videoId);
+      }
+      return next;
+    });
+  }
+
+  async function uploadVideo() {
+    if (!file) throw new Error("Select an MP4 file");
+    const formData = new FormData();
+    formData.set("video", file);
+    formData.set("title", form.title || file.name);
+    formData.set("description", form.description);
+    formData.set("h5pConfig", JSON.stringify({ interactions: form.popupTitle ? [{ id: crypto.randomUUID(), time: Number(form.popupTime), type: "popup", title: form.popupTitle, prompt: form.popupPrompt }] : [] }));
+    await api.uploadVideo(token, formData);
+    setForm({ title: "", description: "", popupTime: "15", popupTitle: "Check", popupPrompt: "Do you confirm that you understood the content?" });
+    setFile(null);
+  }
+
+  async function deleteSelectedVideos() {
+    const videoIds = [...selectedVideoIds];
+    if (videoIds.length === 0) throw new Error("Select at least one video");
+    await api.deleteVideos(token, videoIds);
+    setSelectedVideoIds(new Set());
+  }
+
+  function confirmDeleteSelectedVideos() {
+    const videoCount = selectedVideoIds.size;
+    if (videoCount === 0 || !window.confirm(`Delete ${videoCount} selected video${videoCount === 1 ? "" : "s"}?`)) {
+      return;
+    }
+
+    void onRunAction(deleteSelectedVideos, "Selected videos deleted");
+  }
+
+  return (
+    <div className="grid gap-4 xl:grid-cols-[420px_minmax(0,1fr)]">
+      <div className="space-y-4">
+        <Card>
+          <CardHeader><CardTitle>Upload MP4</CardTitle></CardHeader>
+          <CardContent className="space-y-3">
+            <input className="field" placeholder="Video title" value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} />
+            <textarea className="textarea-field" placeholder="Description" value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} />
+            <input className="field" type="file" accept="video/mp4" onChange={(event) => setFile(event.target.files?.[0] ?? null)} />
+            <div className="rounded-md border bg-muted/30 p-3">
+              <p className="mb-3 text-sm font-semibold">Initial H5P popup</p>
+              <div className="grid gap-2 sm:grid-cols-3">
+                <input className="field" type="number" min="0" placeholder="Second" value={form.popupTime} onChange={(event) => setForm({ ...form, popupTime: event.target.value })} />
+                <input className="field sm:col-span-2" placeholder="Popup title" value={form.popupTitle} onChange={(event) => setForm({ ...form, popupTitle: event.target.value })} />
+              </div>
+              <textarea className="textarea-field mt-2" placeholder="Popup text" value={form.popupPrompt} onChange={(event) => setForm({ ...form, popupPrompt: event.target.value })} />
+            </div>
+            <Button variant="secondary" onClick={() => onRunAction(uploadVideo, "Video uploaded")}><Upload className="h-4 w-4" aria-hidden="true" />Upload</Button>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <CardTitle>Video library</CardTitle>
+              <Button variant="destructive" size="sm" disabled={selectedVideoIds.size === 0} onClick={confirmDeleteSelectedVideos}><Trash2 className="h-4 w-4" aria-hidden="true" />Delete selected</Button>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {directory.videos.map((video) => (
+              <div key={video.id} className={cn("grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 rounded-md border bg-white px-3 py-3", selectedVideo?.id === video.id && "border-primary bg-primary/10")}>
+                <input type="checkbox" checked={selectedVideoIds.has(video.id)} onChange={() => toggleVideoSelection(video.id)} aria-label={`Select ${video.title}`} />
+                <button className="min-w-0 text-left" onClick={() => setSelectedVideoId(video.id)} type="button">
+                  <span className="block truncate text-sm font-semibold">{video.title}</span>
+                  <span className="text-xs text-muted-foreground">{video.h5pConfig?.interactions?.length ?? 0} H5P checks</span>
+                </button>
+                <ChevronRight className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+              </div>
+            ))}
+            {directory.videos.length === 0 && <EmptyInline title="No videos" description="Uploaded videos will appear here." />}
+          </CardContent>
+        </Card>
+      </div>
+
+      {selectedVideo ? <VideoDetailEditor token={token} video={selectedVideo} onRunAction={onRunAction} /> : <EmptyState title="No video selected" description="Upload or select a video to edit metadata and H5P checkpoints." />}
+    </div>
+  );
+}
+
+function VideoDetailEditor({ token, video, onRunAction }: { token: string; video: DirectoryVideo; onRunAction: (action: () => Promise<unknown>, message: string) => Promise<void> }) {
+  const [form, setForm] = useState({ title: video.title, description: video.description, durationSeconds: video.durationSeconds?.toString() ?? "" });
+  const [interactions, setInteractions] = useState<H5PInteraction[]>(video.h5pConfig?.interactions ?? []);
+
+  useEffect(() => {
+    setForm({ title: video.title, description: video.description, durationSeconds: video.durationSeconds?.toString() ?? "" });
+    setInteractions(video.h5pConfig?.interactions ?? []);
+  }, [video.description, video.durationSeconds, video.h5pConfig, video.id, video.title]);
+
+  async function saveVideo() {
+    await api.updateVideo(token, video.id, {
+      title: form.title,
+      description: form.description,
+      durationSeconds: form.durationSeconds ? Number(form.durationSeconds) : null,
+      h5pConfig: { interactions }
+    });
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div><CardTitle>Edit video</CardTitle><p className="mt-1 text-sm text-muted-foreground">{video.title}</p></div>
+          <Button onClick={() => onRunAction(saveVideo, "Video saved")}><Save className="h-4 w-4" aria-hidden="true" />Save video</Button>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_180px]">
+          <label className="text-sm font-medium">Title<input className="field mt-1" value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} /></label>
+          <label className="text-sm font-medium">Duration<input className="field mt-1" type="number" min="1" placeholder="Seconds" value={form.durationSeconds} onChange={(event) => setForm({ ...form, durationSeconds: event.target.value })} /></label>
+        </div>
+        <label className="block text-sm font-medium">Description<textarea className="textarea-field mt-1" value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} /></label>
+        <H5PInteractionEditor interactions={interactions} onChange={setInteractions} />
+      </CardContent>
+    </Card>
+  );
+}
+
+function H5PInteractionEditor({ interactions, onChange }: { interactions: H5PInteraction[]; onChange: (interactions: H5PInteraction[]) => void }) {
+  function updateInteraction(index: number, patch: Partial<H5PInteraction>) {
+    onChange(interactions.map((interaction, position) => (position === index ? { ...interaction, ...patch } : interaction)));
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <p className="text-sm font-semibold">H5P checkpoints</p>
+        <Button variant="outline" onClick={() => onChange([...interactions, { id: crypto.randomUUID(), time: 0, type: "checkpoint", title: "New checkpoint", prompt: "Record that the learner reached this point." }])}><Plus className="h-4 w-4" aria-hidden="true" />Add checkpoint</Button>
+      </div>
+      {interactions.map((interaction, index) => (
+        <div key={interaction.id} className="rounded-md border bg-white p-3">
+          <div className="grid gap-3 md:grid-cols-[120px_1fr_1fr]">
+            <label className="text-sm font-medium">Time<input className="field mt-1" type="number" min="0" value={interaction.time} onChange={(event) => updateInteraction(index, { time: Number(event.target.value) })} /></label>
+            <label className="text-sm font-medium">Title<input className="field mt-1" value={interaction.title} onChange={(event) => updateInteraction(index, { title: event.target.value })} /></label>
+            <label className="text-sm font-medium">Type<select className="field mt-1" value={interaction.type} onChange={(event) => updateInteraction(index, { type: event.target.value })}><option value="popup">Popup</option><option value="checkpoint">Checkpoint</option></select></label>
+          </div>
+          <label className="mt-3 block text-sm font-medium">Prompt<textarea className="textarea-field mt-1" value={interaction.prompt} onChange={(event) => updateInteraction(index, { prompt: event.target.value })} /></label>
+          <div className="mt-3 flex justify-end"><Button variant="ghost" size="sm" onClick={() => onChange(interactions.filter((_, position) => position !== index))}>Remove</Button></div>
+        </div>
+      ))}
+      {interactions.length === 0 && <EmptyInline title="No H5P interactions" description="Add checkpoints or popups to this video." />}
     </div>
   );
 }
