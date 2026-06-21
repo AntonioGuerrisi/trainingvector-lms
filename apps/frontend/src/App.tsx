@@ -391,7 +391,7 @@ function PageRouter({
   }
 
   if (activePage === "courses" && directory) {
-    return <CourseManagementPage token={token} courses={courses} directory={directory} onRunAction={onRunAction} />;
+    return <CourseManagementWorkspace token={token} courses={courses.filter((course) => !isStandaloneCourse(course))} directory={directory} onRunAction={onRunAction} />;
   }
 
   if (activePage === "progress") {
@@ -858,7 +858,7 @@ function UserManagementPage({ token, directory, onRunAction }: { token: string; 
 }
 
 function VideoManagementPage({ token, directory, onRunAction }: { token: string; directory: DirectoryData; onRunAction: (action: () => Promise<unknown>, message: string) => Promise<void> }) {
-  const [form, setForm] = useState({ title: "", description: "", popupTime: "15", popupTitle: "Check", popupPrompt: "Do you confirm that you understood the content?" });
+  const [form, setForm] = useState({ title: "", description: "" });
   const [file, setFile] = useState<File | null>(null);
   const [selectedVideoId, setSelectedVideoId] = useState(directory.videos[0]?.id ?? "");
   const [selectedVideoIds, setSelectedVideoIds] = useState<Set<string>>(new Set());
@@ -887,9 +887,9 @@ function VideoManagementPage({ token, directory, onRunAction }: { token: string;
     formData.set("video", file);
     formData.set("title", form.title || file.name);
     formData.set("description", form.description);
-    formData.set("h5pConfig", JSON.stringify({ interactions: form.popupTitle ? [{ id: crypto.randomUUID(), time: Number(form.popupTime), type: "popup", title: form.popupTitle, prompt: form.popupPrompt }] : [] }));
+    formData.set("h5pConfig", JSON.stringify({ interactions: [] }));
     await api.uploadVideo(token, formData);
-    setForm({ title: "", description: "", popupTime: "15", popupTitle: "Check", popupPrompt: "Do you confirm that you understood the content?" });
+    setForm({ title: "", description: "" });
     setFile(null);
   }
 
@@ -918,14 +918,6 @@ function VideoManagementPage({ token, directory, onRunAction }: { token: string;
             <input className="field" placeholder="Video title" value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} />
             <textarea className="textarea-field" placeholder="Description" value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} />
             <input className="field" type="file" accept="video/mp4" onChange={(event) => setFile(event.target.files?.[0] ?? null)} />
-            <div className="rounded-md border bg-muted/30 p-3">
-              <p className="mb-3 text-sm font-semibold">Initial H5P popup</p>
-              <div className="grid gap-2 sm:grid-cols-3">
-                <input className="field" type="number" min="0" placeholder="Second" value={form.popupTime} onChange={(event) => setForm({ ...form, popupTime: event.target.value })} />
-                <input className="field sm:col-span-2" placeholder="Popup title" value={form.popupTitle} onChange={(event) => setForm({ ...form, popupTitle: event.target.value })} />
-              </div>
-              <textarea className="textarea-field mt-2" placeholder="Popup text" value={form.popupPrompt} onChange={(event) => setForm({ ...form, popupPrompt: event.target.value })} />
-            </div>
             <Button variant="secondary" onClick={() => onRunAction(uploadVideo, "Video uploaded")}><Upload className="h-4 w-4" aria-hidden="true" />Upload</Button>
           </CardContent>
         </Card>
@@ -1023,38 +1015,134 @@ function H5PInteractionEditor({ interactions, onChange }: { interactions: H5PInt
   );
 }
 
-function VideoUploadPage({ token, directory, onRunAction }: { token: string; directory: DirectoryData; onRunAction: (action: () => Promise<unknown>, message: string) => Promise<void> }) {
-  const [form, setForm] = useState({ title: "", description: "", popupTime: "15", popupTitle: "Check", popupPrompt: "Do you confirm that you understood the content?" });
-  const [file, setFile] = useState<File | null>(null);
-  async function uploadVideo() { if (!file) throw new Error("Select an MP4 file"); const formData = new FormData(); formData.set("video", file); formData.set("title", form.title || file.name); formData.set("description", form.description); formData.set("h5pConfig", JSON.stringify({ interactions: form.popupTitle ? [{ id: crypto.randomUUID(), time: Number(form.popupTime), type: "popup", title: form.popupTitle, prompt: form.popupPrompt }] : [] })); await api.uploadVideo(token, formData); }
-  return <div className="grid gap-4 xl:grid-cols-[420px_minmax(0,1fr)]"><Card><CardHeader><CardTitle>Upload MP4</CardTitle></CardHeader><CardContent className="space-y-3"><input className="field" placeholder="Video title" value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} /><textarea className="textarea-field" placeholder="Description" value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} /><input className="field" type="file" accept="video/mp4" onChange={(event) => setFile(event.target.files?.[0] ?? null)} /><div className="rounded-md border bg-muted/30 p-3"><p className="mb-3 text-sm font-semibold">Initial H5P popup</p><div className="grid gap-2 sm:grid-cols-3"><input className="field" type="number" min="0" placeholder="Second" value={form.popupTime} onChange={(event) => setForm({ ...form, popupTime: event.target.value })} /><input className="field sm:col-span-2" placeholder="Popup title" value={form.popupTitle} onChange={(event) => setForm({ ...form, popupTitle: event.target.value })} /></div><textarea className="textarea-field mt-2" placeholder="Popup text" value={form.popupPrompt} onChange={(event) => setForm({ ...form, popupPrompt: event.target.value })} /></div><Button variant="secondary" onClick={() => onRunAction(uploadVideo, "Video uploaded")}><Upload className="h-4 w-4" aria-hidden="true" />Upload</Button></CardContent></Card><Card><CardHeader><CardTitle>Video library</CardTitle></CardHeader><CardContent className="space-y-2">{directory.videos.map((video) => <CompactItem key={video.id} title={video.title} detail={`${video.h5pConfig?.interactions?.length ?? 0} H5P checks`} />)}</CardContent></Card></div>;
-}
-
-function H5PManagementPage({ token, directory, onRunAction }: { token: string; directory: DirectoryData; onRunAction: (action: () => Promise<unknown>, message: string) => Promise<void> }) {
-  const [selectedVideoId, setSelectedVideoId] = useState(directory.videos[0]?.id ?? "");
-  const selectedVideo = directory.videos.find((video) => video.id === selectedVideoId) ?? directory.videos[0];
-  if (!selectedVideo) return <EmptyState title="No videos" description="Upload an MP4 video before configuring H5P controls." />;
-  return <div className="grid gap-4 xl:grid-cols-[360px_minmax(0,1fr)]"><Card><CardHeader><CardTitle>Videos</CardTitle></CardHeader><CardContent className="space-y-2">{directory.videos.map((video) => <button key={video.id} className={cn("flex w-full items-center justify-between gap-3 rounded-md border px-3 py-3 text-left", selectedVideo.id === video.id && "border-primary bg-primary/10")} onClick={() => setSelectedVideoId(video.id)} type="button"><span className="min-w-0"><span className="block truncate text-sm font-semibold">{video.title}</span><span className="text-xs text-muted-foreground">{video.h5pConfig?.interactions?.length ?? 0} configured interactions</span></span><ChevronRight className="h-4 w-4" aria-hidden="true" /></button>)}</CardContent></Card><H5PEditor video={selectedVideo} onSave={(interactions) => onRunAction(() => api.updateVideoH5P(token, selectedVideo.id, { interactions }), "H5P configuration saved")} /></div>;
-}
-
-function H5PEditor({ video, onSave }: { video: DirectoryVideo; onSave: (interactions: H5PInteraction[]) => Promise<void> }) {
-  const [interactions, setInteractions] = useState<H5PInteraction[]>(video.h5pConfig?.interactions ?? []);
-  useEffect(() => { setInteractions(video.h5pConfig?.interactions ?? []); }, [video.id, video.h5pConfig]);
-  function updateInteraction(index: number, patch: Partial<H5PInteraction>) { setInteractions((current) => current.map((interaction, position) => (position === index ? { ...interaction, ...patch } : interaction))); }
-  return <Card><CardHeader><div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"><div><CardTitle>{video.title}</CardTitle><p className="mt-1 text-sm text-muted-foreground">Configure multiple checkpoints and popups for this video.</p></div><Button variant="outline" onClick={() => setInteractions((current) => [...current, { id: crypto.randomUUID(), time: 0, type: "checkpoint", title: "New checkpoint", prompt: "Record that the learner reached this point." }])}><Plus className="h-4 w-4" aria-hidden="true" />Add checkpoint</Button></div></CardHeader><CardContent className="space-y-3">{interactions.map((interaction, index) => <div key={interaction.id} className="rounded-md border bg-white p-3"><div className="grid gap-3 md:grid-cols-[120px_1fr_1fr]"><label className="text-sm font-medium">Time<input className="field mt-1" type="number" min="0" value={interaction.time} onChange={(event) => updateInteraction(index, { time: Number(event.target.value) })} /></label><label className="text-sm font-medium">Title<input className="field mt-1" value={interaction.title} onChange={(event) => updateInteraction(index, { title: event.target.value })} /></label><label className="text-sm font-medium">Type<select className="field mt-1" value={interaction.type} onChange={(event) => updateInteraction(index, { type: event.target.value })}><option value="popup">Popup</option><option value="checkpoint">Checkpoint</option></select></label></div><label className="mt-3 block text-sm font-medium">Prompt<textarea className="textarea-field mt-1" value={interaction.prompt} onChange={(event) => updateInteraction(index, { prompt: event.target.value })} /></label><div className="mt-3 flex justify-end"><Button variant="ghost" size="sm" onClick={() => setInteractions((current) => current.filter((_, position) => position !== index))}>Remove</Button></div></div>)}{interactions.length === 0 && <EmptyInline title="No H5P interactions" description="Add checkpoints for transparent tracking or popups for learner confirmation." />}<Button onClick={() => onSave(interactions)}><Save className="h-4 w-4" aria-hidden="true" />Save H5P configuration</Button></CardContent></Card>;
-}
-
 function GroupManagementPage({ token, directory, onRunAction }: { token: string; directory: DirectoryData; onRunAction: (action: () => Promise<unknown>, message: string) => Promise<void> }) {
   const [groupName, setGroupName] = useState(""); const [selectedGroupId, setSelectedGroupId] = useState(directory.groups[0]?.id ?? ""); const [selectedUserId, setSelectedUserId] = useState(directory.users.find((user) => user.role === "STUDENT")?.id ?? directory.users[0]?.id ?? ""); const selectedGroup = directory.groups.find((group) => group.id === selectedGroupId) ?? directory.groups[0]; const learners = directory.users.filter((entry) => entry.role === "STUDENT");
   return <div className="grid gap-4 xl:grid-cols-[420px_minmax(0,1fr)]"><Card><CardHeader><CardTitle>Group setup</CardTitle></CardHeader><CardContent className="space-y-3"><input className="field" placeholder="Group name" value={groupName} onChange={(event) => setGroupName(event.target.value)} /><Button onClick={() => onRunAction(() => api.createGroup(token, { name: groupName }), "Group created")}><Plus className="h-4 w-4" aria-hidden="true" />Create group</Button><div className="border-t pt-3"><p className="mb-2 text-sm font-semibold">Add learner</p><select className="field" value={selectedGroup?.id ?? ""} onChange={(event) => setSelectedGroupId(event.target.value)}>{directory.groups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}</select><select className="field mt-2" value={selectedUserId} onChange={(event) => setSelectedUserId(event.target.value)}>{learners.map((entry) => <option key={entry.id} value={entry.id}>{entry.name}</option>)}</select><Button className="mt-2" variant="secondary" disabled={!selectedGroup} onClick={() => onRunAction(() => api.addGroupMember(token, selectedGroup!.id, { userId: selectedUserId, roleLabel: "learner" }), "Learner added")}><UserPlus className="h-4 w-4" aria-hidden="true" />Add to group</Button></div></CardContent></Card><Card><CardHeader><CardTitle>Groups and members</CardTitle></CardHeader><CardContent className="grid gap-3 lg:grid-cols-2">{directory.groups.map((group) => <div key={group.id} className="rounded-md border bg-white p-3"><p className="font-semibold">{group.name}</p><p className="text-sm text-muted-foreground">{group.members.length} members</p><div className="mt-3 space-y-2">{group.members.map((member) => <CompactItem key={member.user.id} title={member.user.name} detail={member.user.email} />)}</div></div>)}</CardContent></Card></div>;
 }
 
-function CourseManagementPage({ token, courses, directory, onRunAction }: { token: string; courses: Course[]; directory: DirectoryData; onRunAction: (action: () => Promise<unknown>, message: string) => Promise<void> }) {
+function CourseManagementWorkspace({ token, courses, directory, onRunAction }: { token: string; courses: Course[]; directory: DirectoryData; onRunAction: (action: () => Promise<unknown>, message: string) => Promise<void> }) {
+  const activeCourses = useMemo(() => courses.filter((course) => course.status !== "ARCHIVED"), [courses]);
   const [courseForm, setCourseForm] = useState({ title: "", description: "", status: "PUBLISHED" as Course["status"] });
-  const [attachForm, setAttachForm] = useState({ courseId: courses[0]?.id ?? "", videoId: directory.videos[0]?.id ?? "", position: "1", gatePrevious: true });
-  const [assignmentForm, setAssignmentForm] = useState({ targetType: "group", contentType: "course", courseId: courses[0]?.id ?? "", videoId: directory.videos[0]?.id ?? "", userId: directory.users[0]?.id ?? "", groupId: directory.groups[0]?.id ?? "", dueAt: "", notes: "" });
-  useEffect(() => { setAttachForm((current) => ({ ...current, courseId: current.courseId || courses[0]?.id || "", videoId: current.videoId || directory.videos[0]?.id || "" })); setAssignmentForm((current) => ({ ...current, courseId: current.courseId || courses[0]?.id || "", videoId: current.videoId || directory.videos[0]?.id || "", userId: current.userId || directory.users[0]?.id || "", groupId: current.groupId || directory.groups[0]?.id || "" })); }, [courses, directory]);
-  return <div className="grid gap-4 xl:grid-cols-3"><Card><CardHeader><CardTitle>Create course</CardTitle></CardHeader><CardContent className="space-y-3"><input className="field" placeholder="Title" value={courseForm.title} onChange={(event) => setCourseForm({ ...courseForm, title: event.target.value })} /><textarea className="textarea-field" placeholder="Description" value={courseForm.description} onChange={(event) => setCourseForm({ ...courseForm, description: event.target.value })} /><select className="field" value={courseForm.status} onChange={(event) => setCourseForm({ ...courseForm, status: event.target.value as Course["status"] })}><option value="DRAFT">Draft</option><option value="PUBLISHED">Published</option><option value="ARCHIVED">Archived</option></select><Button onClick={() => onRunAction(() => api.createCourse(token, courseForm), "Course created")}><Plus className="h-4 w-4" aria-hidden="true" />Create course</Button></CardContent></Card><Card><CardHeader><CardTitle>Sequence videos</CardTitle></CardHeader><CardContent className="space-y-3"><select className="field" value={attachForm.courseId} onChange={(event) => setAttachForm({ ...attachForm, courseId: event.target.value })}>{courses.map((course) => <option key={course.id} value={course.id}>{course.title}</option>)}</select><select className="field" value={attachForm.videoId} onChange={(event) => setAttachForm({ ...attachForm, videoId: event.target.value })}>{directory.videos.map((video) => <option key={video.id} value={video.id}>{video.title}</option>)}</select><div className="grid grid-cols-[1fr_auto] gap-3"><input className="field" type="number" min="1" value={attachForm.position} onChange={(event) => setAttachForm({ ...attachForm, position: event.target.value })} /><label className="flex h-10 items-center gap-2 rounded-md border bg-white px-3 text-sm"><input type="checkbox" checked={attachForm.gatePrevious} onChange={(event) => setAttachForm({ ...attachForm, gatePrevious: event.target.checked })} />Gate</label></div><Button variant="secondary" onClick={() => onRunAction(() => api.attachVideo(token, attachForm.courseId, { videoId: attachForm.videoId, position: Number(attachForm.position), gatePrevious: attachForm.gatePrevious }), "Video linked")}><ChevronRight className="h-4 w-4" aria-hidden="true" />Link video</Button></CardContent></Card><Card><CardHeader><CardTitle>Assign learning</CardTitle></CardHeader><CardContent className="space-y-3"><div className="grid grid-cols-2 gap-2"><select className="field" value={assignmentForm.contentType} onChange={(event) => setAssignmentForm({ ...assignmentForm, contentType: event.target.value })}><option value="course">Course</option><option value="video">Video</option></select><select className="field" value={assignmentForm.targetType} onChange={(event) => setAssignmentForm({ ...assignmentForm, targetType: event.target.value })}><option value="group">Group</option><option value="user">User</option></select></div>{assignmentForm.contentType === "course" ? <select className="field" value={assignmentForm.courseId} onChange={(event) => setAssignmentForm({ ...assignmentForm, courseId: event.target.value })}>{courses.map((course) => <option key={course.id} value={course.id}>{course.title}</option>)}</select> : <select className="field" value={assignmentForm.videoId} onChange={(event) => setAssignmentForm({ ...assignmentForm, videoId: event.target.value })}>{directory.videos.map((video) => <option key={video.id} value={video.id}>{video.title}</option>)}</select>}{assignmentForm.targetType === "group" ? <select className="field" value={assignmentForm.groupId} onChange={(event) => setAssignmentForm({ ...assignmentForm, groupId: event.target.value })}>{directory.groups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}</select> : <select className="field" value={assignmentForm.userId} onChange={(event) => setAssignmentForm({ ...assignmentForm, userId: event.target.value })}>{directory.users.map((entry) => <option key={entry.id} value={entry.id}>{entry.name} - {roleLabel(entry.role)}</option>)}</select>}<input className="field" type="datetime-local" value={assignmentForm.dueAt} onChange={(event) => setAssignmentForm({ ...assignmentForm, dueAt: event.target.value })} /><textarea className="textarea-field" placeholder="Notes" value={assignmentForm.notes} onChange={(event) => setAssignmentForm({ ...assignmentForm, notes: event.target.value })} /><Button onClick={() => onRunAction(() => api.assign(token, { courseId: assignmentForm.contentType === "course" ? assignmentForm.courseId : undefined, videoId: assignmentForm.contentType === "video" ? assignmentForm.videoId : undefined, groupId: assignmentForm.targetType === "group" ? assignmentForm.groupId : undefined, userId: assignmentForm.targetType === "user" ? assignmentForm.userId : undefined, dueAt: assignmentForm.dueAt ? new Date(assignmentForm.dueAt).toISOString() : undefined, notes: assignmentForm.notes || undefined }), "Assignment created")}><ClipboardCheck className="h-4 w-4" aria-hidden="true" />Assign</Button></CardContent></Card></div>;
+  const [editingCourseId, setEditingCourseId] = useState(activeCourses[0]?.id ?? "");
+  const [editForm, setEditForm] = useState({ title: activeCourses[0]?.title ?? "", description: activeCourses[0]?.description ?? "", status: (activeCourses[0]?.status ?? "PUBLISHED") as Course["status"] });
+  const [attachForm, setAttachForm] = useState({ courseId: activeCourses[0]?.id ?? "", videoId: directory.videos[0]?.id ?? "", position: "1", gatePrevious: true });
+  const [assignmentForm, setAssignmentForm] = useState({ targetType: "group", contentType: "course", courseId: activeCourses[0]?.id ?? "", videoId: directory.videos[0]?.id ?? "", userId: directory.users[0]?.id ?? "", groupId: directory.groups[0]?.id ?? "", dueAt: "", notes: "" });
+  const editingCourse = activeCourses.find((course) => course.id === editingCourseId) ?? activeCourses[0];
+
+  useEffect(() => {
+    setEditingCourseId((current) => (current && activeCourses.some((course) => course.id === current) ? current : activeCourses[0]?.id ?? ""));
+    setAttachForm((current) => ({
+      ...current,
+      courseId: current.courseId && activeCourses.some((course) => course.id === current.courseId) ? current.courseId : activeCourses[0]?.id ?? "",
+      videoId: current.videoId && directory.videos.some((video) => video.id === current.videoId) ? current.videoId : directory.videos[0]?.id ?? ""
+    }));
+    setAssignmentForm((current) => ({
+      ...current,
+      courseId: current.courseId && activeCourses.some((course) => course.id === current.courseId) ? current.courseId : activeCourses[0]?.id ?? "",
+      videoId: current.videoId && directory.videos.some((video) => video.id === current.videoId) ? current.videoId : directory.videos[0]?.id ?? "",
+      userId: current.userId && directory.users.some((user) => user.id === current.userId) ? current.userId : directory.users[0]?.id ?? "",
+      groupId: current.groupId && directory.groups.some((group) => group.id === current.groupId) ? current.groupId : directory.groups[0]?.id ?? ""
+    }));
+  }, [activeCourses, directory]);
+
+  useEffect(() => {
+    if (editingCourse) {
+      setEditForm({ title: editingCourse.title, description: editingCourse.description, status: editingCourse.status });
+    }
+  }, [editingCourse]);
+
+  async function createCourse() {
+    await api.createCourse(token, courseForm);
+    setCourseForm({ title: "", description: "", status: "PUBLISHED" });
+  }
+
+  async function saveCourse() {
+    if (!editingCourse) throw new Error("Select a course");
+    await api.updateCourse(token, editingCourse.id, editForm);
+  }
+
+  function confirmDeleteCourse(course: Course) {
+    if (!window.confirm(`Delete course ${course.title}?`)) {
+      return;
+    }
+
+    void onRunAction(() => api.deleteCourse(token, course.id), "Course deleted");
+  }
+
+  return (
+    <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_420px]">
+      <div className="space-y-4">
+        <Card>
+          <CardHeader><CardTitle>Active courses</CardTitle></CardHeader>
+          <CardContent className="space-y-2">
+            {activeCourses.map((course) => (
+              <div key={course.id} className={cn("grid gap-3 rounded-md border bg-white p-3 lg:grid-cols-[minmax(0,1fr)_auto]", editingCourse?.id === course.id && "border-primary bg-primary/10")}>
+                <button className="min-w-0 text-left" type="button" onClick={() => setEditingCourseId(course.id)}>
+                  <span className="block truncate text-sm font-semibold">{course.title}</span>
+                  <span className="text-xs text-muted-foreground">{course.totalVideos} videos - {course.status}</span>
+                </button>
+                <div className="flex items-center gap-2">
+                  <Button size="icon" variant="outline" title="Edit course" aria-label="Edit course" onClick={() => setEditingCourseId(course.id)}><Pencil className="h-4 w-4" aria-hidden="true" /></Button>
+                  <Button size="icon" variant="destructive" title="Delete course" aria-label="Delete course" onClick={() => confirmDeleteCourse(course)}><Trash2 className="h-4 w-4" aria-hidden="true" /></Button>
+                </div>
+              </div>
+            ))}
+            {activeCourses.length === 0 && <EmptyInline title="No active courses" description="Create or publish courses to manage them here." />}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader><CardTitle>Create course</CardTitle></CardHeader>
+          <CardContent className="space-y-3">
+            <input className="field" placeholder="Title" value={courseForm.title} onChange={(event) => setCourseForm({ ...courseForm, title: event.target.value })} />
+            <textarea className="textarea-field" placeholder="Description" value={courseForm.description} onChange={(event) => setCourseForm({ ...courseForm, description: event.target.value })} />
+            <select className="field" value={courseForm.status} onChange={(event) => setCourseForm({ ...courseForm, status: event.target.value as Course["status"] })}><option value="DRAFT">Draft</option><option value="PUBLISHED">Published</option><option value="ARCHIVED">Archived</option></select>
+            <Button onClick={() => onRunAction(createCourse, "Course created")}><Plus className="h-4 w-4" aria-hidden="true" />Create course</Button>
+          </CardContent>
+        </Card>
+      </div>
+
+      <div className="space-y-4">
+        <Card>
+          <CardHeader><CardTitle>Edit course</CardTitle></CardHeader>
+          <CardContent className="space-y-3">
+            {editingCourse ? (
+              <>
+                <input className="field" placeholder="Title" value={editForm.title} onChange={(event) => setEditForm({ ...editForm, title: event.target.value })} />
+                <textarea className="textarea-field" placeholder="Description" value={editForm.description} onChange={(event) => setEditForm({ ...editForm, description: event.target.value })} />
+                <select className="field" value={editForm.status} onChange={(event) => setEditForm({ ...editForm, status: event.target.value as Course["status"] })}><option value="DRAFT">Draft</option><option value="PUBLISHED">Published</option><option value="ARCHIVED">Archived</option></select>
+                <Button onClick={() => onRunAction(saveCourse, "Course saved")}><Save className="h-4 w-4" aria-hidden="true" />Save course</Button>
+              </>
+            ) : (
+              <EmptyInline title="No course selected" description="Select an active course to edit it." />
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader><CardTitle>Sequence videos</CardTitle></CardHeader>
+          <CardContent className="space-y-3">
+            <select className="field" value={attachForm.courseId} onChange={(event) => setAttachForm({ ...attachForm, courseId: event.target.value })}>{activeCourses.map((course) => <option key={course.id} value={course.id}>{course.title}</option>)}</select>
+            <select className="field" value={attachForm.videoId} onChange={(event) => setAttachForm({ ...attachForm, videoId: event.target.value })}>{directory.videos.map((video) => <option key={video.id} value={video.id}>{video.title}</option>)}</select>
+            <div className="grid grid-cols-[1fr_auto] gap-3"><input className="field" type="number" min="1" value={attachForm.position} onChange={(event) => setAttachForm({ ...attachForm, position: event.target.value })} /><label className="flex h-10 items-center gap-2 rounded-md border bg-white px-3 text-sm"><input type="checkbox" checked={attachForm.gatePrevious} onChange={(event) => setAttachForm({ ...attachForm, gatePrevious: event.target.checked })} />Gate</label></div>
+            <Button variant="secondary" disabled={!attachForm.courseId || !attachForm.videoId} onClick={() => onRunAction(() => api.attachVideo(token, attachForm.courseId, { videoId: attachForm.videoId, position: Number(attachForm.position), gatePrevious: attachForm.gatePrevious }), "Video linked")}><ChevronRight className="h-4 w-4" aria-hidden="true" />Link video</Button>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader><CardTitle>Assign learning</CardTitle></CardHeader>
+          <CardContent className="space-y-3">
+            <div className="grid grid-cols-2 gap-2"><select className="field" value={assignmentForm.contentType} onChange={(event) => setAssignmentForm({ ...assignmentForm, contentType: event.target.value })}><option value="course">Course</option><option value="video">Video</option></select><select className="field" value={assignmentForm.targetType} onChange={(event) => setAssignmentForm({ ...assignmentForm, targetType: event.target.value })}><option value="group">Group</option><option value="user">User</option></select></div>
+            {assignmentForm.contentType === "course" ? <select className="field" value={assignmentForm.courseId} onChange={(event) => setAssignmentForm({ ...assignmentForm, courseId: event.target.value })}>{activeCourses.map((course) => <option key={course.id} value={course.id}>{course.title}</option>)}</select> : <select className="field" value={assignmentForm.videoId} onChange={(event) => setAssignmentForm({ ...assignmentForm, videoId: event.target.value })}>{directory.videos.map((video) => <option key={video.id} value={video.id}>{video.title}</option>)}</select>}
+            {assignmentForm.targetType === "group" ? <select className="field" value={assignmentForm.groupId} onChange={(event) => setAssignmentForm({ ...assignmentForm, groupId: event.target.value })}>{directory.groups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}</select> : <select className="field" value={assignmentForm.userId} onChange={(event) => setAssignmentForm({ ...assignmentForm, userId: event.target.value })}>{directory.users.map((entry) => <option key={entry.id} value={entry.id}>{entry.name} - {roleLabel(entry.role)}</option>)}</select>}
+            <input className="field" type="datetime-local" value={assignmentForm.dueAt} onChange={(event) => setAssignmentForm({ ...assignmentForm, dueAt: event.target.value })} />
+            <textarea className="textarea-field" placeholder="Notes" value={assignmentForm.notes} onChange={(event) => setAssignmentForm({ ...assignmentForm, notes: event.target.value })} />
+            <Button onClick={() => onRunAction(() => api.assign(token, { courseId: assignmentForm.contentType === "course" ? assignmentForm.courseId : undefined, videoId: assignmentForm.contentType === "video" ? assignmentForm.videoId : undefined, groupId: assignmentForm.targetType === "group" ? assignmentForm.groupId : undefined, userId: assignmentForm.targetType === "user" ? assignmentForm.userId : undefined, dueAt: assignmentForm.dueAt ? new Date(assignmentForm.dueAt).toISOString() : undefined, notes: assignmentForm.notes || undefined }), "Assignment created")}><ClipboardCheck className="h-4 w-4" aria-hidden="true" />Assign</Button>
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  );
 }
 
 function ProgressCertificationPage({ courses, progressRows }: { courses: Course[]; progressRows: ProgressReportRow[] }) {

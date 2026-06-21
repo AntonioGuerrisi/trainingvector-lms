@@ -137,6 +137,19 @@ export const api = {
       body: payload
     });
   },
+  updateCourse(token: string, courseId: string, payload: { title: string; description: string; status: "DRAFT" | "PUBLISHED" | "ARCHIVED" }) {
+    return request<{ course: Course }>(`/api/admin/courses/${courseId}`, {
+      method: "PUT",
+      token,
+      body: payload
+    });
+  },
+  deleteCourse(token: string, courseId: string) {
+    return request<{ deletedCourseId: string }>(`/api/admin/courses/${courseId}`, {
+      method: "DELETE",
+      token
+    });
+  },
   attachVideo(token: string, courseId: string, payload: { videoId: string; position: number; gatePrevious: boolean }) {
     return request<{ courseVideo: unknown }>(`/api/admin/courses/${courseId}/videos`, {
       method: "POST",

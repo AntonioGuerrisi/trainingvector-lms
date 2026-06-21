@@ -42,6 +42,12 @@ const createCourseSchema = z.object({
   status: z.nativeEnum(CourseStatus).default(CourseStatus.DRAFT)
 });
 
+const updateCourseSchema = z.object({
+  title: z.string().min(3),
+  description: z.string().min(3),
+  status: z.nativeEnum(CourseStatus)
+});
+
 const createUserSchema = z.object({
   name: z.string().min(2),
   email: z.string().email(),
@@ -396,6 +402,53 @@ router.post(
 
     await invalidateReports();
     res.status(201).json({ course });
+  })
+);
+
+router.put(
+  "/courses/:courseId",
+  authorize(Role.PROFESSOR, Role.ADMIN),
+  asyncHandler(async (req, res) => {
+    const input = updateCourseSchema.parse(req.body);
+    const existingCourse = await prisma.course.findUnique({
+      where: { id: req.params.courseId },
+      select: { id: true }
+    });
+
+    if (!existingCourse) {
+      throw new HttpError(404, "Course not found");
+    }
+
+    const course = await prisma.course.update({
+      where: { id: req.params.courseId },
+      data: input
+    });
+
+    await invalidateReports();
+    res.json({ course });
+  })
+);
+
+router.delete(
+  "/courses/:courseId",
+  authorize(Role.PROFESSOR, Role.ADMIN),
+  asyncHandler(async (req, res) => {
+    const existingCourse = await prisma.course.findUnique({
+      where: { id: req.params.courseId },
+      select: { id: true }
+    });
+
+    if (!existingCourse) {
+      throw new HttpError(404, "Course not found");
+    }
+
+    const course = await prisma.course.delete({
+      where: { id: req.params.courseId },
+      select: { id: true }
+    });
+
+    await invalidateReports();
+    res.json({ deletedCourseId: course.id });
   })
 );
 
