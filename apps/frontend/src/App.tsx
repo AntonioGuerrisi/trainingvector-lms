@@ -72,6 +72,9 @@ function navigationForRole(role: Role): NavItem[] {
     return [
       { id: "dashboard", label: "Dashboard", description: "System overview", icon: Home },
       { id: "users", label: "Users", description: "Create accounts", icon: UserPlus },
+      { id: "groups", label: "Groups", description: "Learner cohorts", icon: Users },
+      { id: "courses", label: "Courses", description: "Build paths", icon: Layers },
+      { id: "progress", label: "Certification", description: "Review progress", icon: Award },
       { id: "upload", label: "Video upload", description: "Add MP4 assets", icon: Upload },
       { id: "h5p", label: "H5P controls", description: "Checks and popups", icon: ListChecks },
       { id: "reports", label: "Reports", description: "Usage analytics", icon: BarChart3 },
