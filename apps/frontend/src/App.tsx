@@ -37,7 +37,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "./components/ui/card";
 
 type ToastState = { type: "success" | "error"; message: string } | null;
 type ProgressSavedHandler = () => void | Promise<void>;
-type PageId = "dashboard" | "catalog" | "learning" | "users" | "upload" | "h5p" | "groups" | "courses" | "progress" | "reports" | "settings";
+type PageId = "dashboard" | "catalog" | "videos" | "learning" | "users" | "upload" | "h5p" | "groups" | "courses" | "progress" | "reports" | "settings";
 type IconComponent = typeof Home;
 
 type NavItem = {
@@ -65,6 +65,10 @@ function isStaff(role: Role) {
 
 function isCheckpointInteraction(interaction: H5PInteraction) {
   return interaction.type === "checkpoint";
+}
+
+function isStandaloneCourse(course: Course) {
+  return course.id.startsWith("standalone:");
 }
 
 function navigationForRole(role: Role): NavItem[] {
@@ -95,8 +99,8 @@ function navigationForRole(role: Role): NavItem[] {
 
   return [
     { id: "dashboard", label: "Dashboard", description: "Your progress", icon: Home },
-    { id: "catalog", label: "Available learning", description: "Courses and videos", icon: BookOpenCheck },
-    { id: "learning", label: "Player", description: "Continue training", icon: PlayCircle },
+    { id: "catalog", label: "Available courses", description: "Assigned course paths", icon: BookOpenCheck },
+    { id: "videos", label: "Available videos", description: "Standalone videos", icon: FileVideo },
     { id: "settings", label: "Settings", description: "Account status", icon: Settings }
   ];
 }
@@ -232,6 +236,7 @@ export function App() {
   }
 
   const navItems = navigationForRole(user.role);
+  const activePageTitle = navItems.find((item) => item.id === activePage)?.label ?? (activePage === "learning" ? "Player" : "Dashboard");
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -281,7 +286,7 @@ export function App() {
             <div className="mx-auto flex max-w-7xl flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between lg:px-6">
               <div>
                 <p className="text-sm font-medium text-primary">{roleLabel(user.role)}</p>
-                <h2 className="text-2xl font-semibold leading-8">{navItems.find((item) => item.id === activePage)?.label ?? "Dashboard"}</h2>
+                <h2 className="text-2xl font-semibold leading-8">{activePageTitle}</h2>
               </div>
               <div className="flex items-center gap-2">
                 <Button variant="outline" size="sm" onClick={() => refreshData()} disabled={loading} title="Refresh data">
@@ -354,14 +359,18 @@ function PageRouter({
   }
 
   if (activePage === "catalog") {
-    return <StudentCatalogPage courses={courses} onSelectLearning={onSelectLearning} />;
+    return <StudentCoursesPage courses={courses.filter((course) => !isStandaloneCourse(course))} onSelectLearning={onSelectLearning} />;
+  }
+
+  if (activePage === "videos") {
+    return <StudentVideosPage courses={courses.filter(isStandaloneCourse)} onSelectLearning={onSelectLearning} />;
   }
 
   if (activePage === "learning") {
     return selectedCourse && selectedVideo ? (
-      <LearningWorkspace token={token} courses={courses} course={selectedCourse} video={selectedVideo} onSelectLearning={onSelectLearning} onProgressSaved={onProgressSaved} onToast={onToast} />
+      <LearningWorkspace token={token} course={selectedCourse} video={selectedVideo} onSelectLearning={onSelectLearning} onProgressSaved={onProgressSaved} onToast={onToast} />
     ) : (
-      <EmptyState title="No available lesson" description="Open the available learning page and choose an unlocked course or video." />
+      <EmptyState title="No available lesson" description="Open an available course or standalone video to start playback." />
     );
   }
 
@@ -463,6 +472,8 @@ function DashboardPage({
   onSelectLearning: (courseId: string, videoId?: string) => void;
 }) {
   if (user.role === "STUDENT") {
+    const courseAssignments = courses.filter((course) => !isStandaloneCourse(course));
+    const standaloneAssignments = courses.filter(isStandaloneCourse);
     const summary = progressSummary(courses);
     const nextCourse = courses.find((course) => course.videos.some((video) => !video.locked && !video.progress.completed));
     const nextVideo = nextCourse?.videos.find((video) => !video.locked && !video.progress.completed);
@@ -470,17 +481,17 @@ function DashboardPage({
     return (
       <div className="space-y-5">
         <MetricGrid metrics={[
-          { label: "Assigned courses", value: summary.assignedCourses, icon: BookOpenCheck },
-          { label: "Assigned videos", value: summary.assignedVideos, icon: FileVideo },
+          { label: "Assigned courses", value: courseAssignments.length, icon: BookOpenCheck },
+          { label: "Standalone videos", value: standaloneAssignments.length, icon: FileVideo },
           { label: "Completed videos", value: summary.completedVideos, icon: Check },
           { label: "Average progress", value: `${summary.averageProgress}%`, icon: Activity }
         ]} />
         <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
           <Card>
-            <CardHeader><CardTitle>Learning progress</CardTitle></CardHeader>
+            <CardHeader><CardTitle>Course progress</CardTitle></CardHeader>
             <CardContent className="space-y-3">
-              {courses.map((course) => <CourseProgressRow key={course.id} course={course} onOpen={() => onSelectLearning(course.id)} />)}
-              {courses.length === 0 && <EmptyInline title="No assignments" description="Assigned courses and videos will appear here." />}
+              {courseAssignments.map((course) => <CourseProgressRow key={course.id} course={course} onOpen={() => onSelectLearning(course.id)} />)}
+              {courseAssignments.length === 0 && <EmptyInline title="No course assignments" description="Assigned courses will appear here." />}
             </CardContent>
           </Card>
           <Card>
@@ -493,7 +504,7 @@ function DashboardPage({
                   <Button onClick={() => onSelectLearning(nextCourse.id, nextVideo.id)}><PlayCircle className="h-4 w-4" aria-hidden="true" />Resume</Button>
                 </div>
               ) : (
-                <EmptyInline title="No pending videos" description="Completed learning items remain available in your catalog." />
+                <EmptyInline title="No pending videos" description="Completed learning items remain available in courses and videos." />
               )}
             </CardContent>
           </Card>
@@ -521,7 +532,7 @@ function DashboardPage({
   );
 }
 
-function StudentCatalogPage({ courses, onSelectLearning }: { courses: Course[]; onSelectLearning: (courseId: string, videoId?: string) => void }) {
+function StudentCoursesPage({ courses, onSelectLearning }: { courses: Course[]; onSelectLearning: (courseId: string, videoId?: string) => void }) {
   return (
     <div className="grid gap-4 lg:grid-cols-2">
       {courses.map((course) => (
@@ -546,30 +557,62 @@ function StudentCatalogPage({ courses, onSelectLearning }: { courses: Course[]; 
           </CardContent>
         </Card>
       ))}
-      {courses.length === 0 && <EmptyState title="No available learning" description="Courses and standalone videos assigned to you will appear here." />}
+      {courses.length === 0 && <EmptyState title="No available courses" description="Assigned courses will appear here." />}
     </div>
   );
 }
 
-function LearningWorkspace({ token, courses, course, video, onSelectLearning, onProgressSaved, onToast }: { token: string; courses: Course[]; course: Course; video: CourseVideo; onSelectLearning: (courseId: string, videoId?: string) => void; onProgressSaved: ProgressSavedHandler; onToast: (toast: ToastState) => void }) {
+function StudentVideosPage({ courses, onSelectLearning }: { courses: Course[]; onSelectLearning: (courseId: string, videoId?: string) => void }) {
+  const standaloneVideos = courses.flatMap((course) => {
+    const video = course.videos[0];
+    return video ? [{ course, video }] : [];
+  });
+
+  return (
+    <div className="grid gap-4 lg:grid-cols-2">
+      {standaloneVideos.map(({ course, video }) => (
+        <Card key={course.id}>
+          <CardHeader>
+            <div className="flex items-start justify-between gap-3">
+              <div><CardTitle>{video.title}</CardTitle><p className="mt-1 text-sm text-muted-foreground">{video.description}</p></div>
+              <span className="rounded-md bg-muted px-2 py-1 text-xs font-semibold">{formatPercent(video.progress.percent)}</span>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="h-2 rounded-full bg-muted"><div className="h-2 rounded-full bg-primary" style={{ width: `${video.progress.percent}%` }} /></div>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-center gap-2 text-sm text-muted-foreground"><FileVideo className="h-4 w-4" aria-hidden="true" />{video.h5pConfig?.interactions?.length ?? 0} H5P interactions</div>
+              <Button onClick={() => onSelectLearning(course.id, video.id)}><PlayCircle className="h-4 w-4" aria-hidden="true" />Open video</Button>
+            </div>
+          </CardContent>
+        </Card>
+      ))}
+      {standaloneVideos.length === 0 && <EmptyState title="No available videos" description="Standalone videos assigned to you will appear here." />}
+    </div>
+  );
+}
+
+function LearningWorkspace({ token, course, video, onSelectLearning, onProgressSaved, onToast }: { token: string; course: Course; video: CourseVideo; onSelectLearning: (courseId: string, videoId?: string) => void; onProgressSaved: ProgressSavedHandler; onToast: (toast: ToastState) => void }) {
+  if (isStandaloneCourse(course)) {
+    return <LearningPanel token={token} course={course} video={video} onProgressSaved={onProgressSaved} onToast={onToast} />;
+  }
+
   return (
     <div className="grid gap-4 xl:grid-cols-[320px_minmax(0,1fr)]">
       <Card>
         <CardHeader><CardTitle>Learning path</CardTitle></CardHeader>
         <CardContent className="space-y-3">
-          {courses.map((entry) => (
-            <div key={entry.id} className="rounded-md border bg-white">
-              <div className="border-b px-3 py-2"><p className="truncate text-sm font-semibold">{entry.title}</p><p className="text-xs text-muted-foreground">{formatPercent(entry.progressPercent)}</p></div>
-              <div className="divide-y">
-                {entry.videos.map((item) => (
-                  <button key={item.id} className={cn("flex w-full items-center gap-2 px-3 py-2 text-left text-sm", item.id === video.id && entry.id === course.id && "bg-primary/10")} disabled={item.locked} onClick={() => onSelectLearning(entry.id, item.id)} type="button">
-                    {item.locked ? <Lock className="h-4 w-4" aria-hidden="true" /> : <PlayCircle className="h-4 w-4" aria-hidden="true" />}
-                    <span className="min-w-0 flex-1 truncate">{item.title}</span>
-                  </button>
-                ))}
-              </div>
+          <div className="rounded-md border bg-white">
+            <div className="border-b px-3 py-2"><p className="truncate text-sm font-semibold">{course.title}</p><p className="text-xs text-muted-foreground">{formatPercent(course.progressPercent)}</p></div>
+            <div className="divide-y">
+              {course.videos.map((item) => (
+                <button key={item.id} className={cn("flex w-full items-center gap-2 px-3 py-2 text-left text-sm", item.id === video.id && "bg-primary/10")} disabled={item.locked} onClick={() => onSelectLearning(course.id, item.id)} type="button">
+                  {item.locked ? <Lock className="h-4 w-4" aria-hidden="true" /> : <PlayCircle className="h-4 w-4" aria-hidden="true" />}
+                  <span className="min-w-0 flex-1 truncate">{item.position}. {item.title}</span>
+                </button>
+              ))}
             </div>
-          ))}
+          </div>
         </CardContent>
       </Card>
       <LearningPanel token={token} course={course} video={video} onProgressSaved={onProgressSaved} onToast={onToast} />
