@@ -1,6 +1,6 @@
 {
   "name": "video-lms-platform",
-  "version": "0.3.2+9",
+  "version": "0.3.7+14",
   "private": true,
   "workspaces": [
     "apps/*"

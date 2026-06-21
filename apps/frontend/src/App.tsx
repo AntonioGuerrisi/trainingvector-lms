@@ -36,6 +36,7 @@ import { Button } from "./components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./components/ui/card";
 
 type ToastState = { type: "success" | "error"; message: string } | null;
+type ProgressSavedHandler = () => void | Promise<void>;
 type PageId = "dashboard" | "catalog" | "learning" | "users" | "upload" | "h5p" | "groups" | "courses" | "progress" | "reports" | "settings";
 type IconComponent = typeof Home;
 
@@ -60,6 +61,10 @@ function roleLabel(role: Role) {
 
 function isStaff(role: Role) {
   return role === "ADMIN" || role === "PROFESSOR";
+}
+
+function isCheckpointInteraction(interaction: H5PInteraction) {
+  return interaction.type === "checkpoint";
 }
 
 function navigationForRole(role: Role): NavItem[] {
@@ -337,7 +342,7 @@ function PageRouter({
   overview: ReportOverview | null;
   progressRows: ProgressReportRow[];
   onSelectLearning: (courseId: string, videoId?: string) => void;
-  onProgressSaved: () => void;
+  onProgressSaved: ProgressSavedHandler;
   onToast: (toast: ToastState) => void;
   onRunAction: (action: () => Promise<unknown>, message: string) => Promise<void>;
 }) {
@@ -543,7 +548,7 @@ function StudentCatalogPage({ courses, onSelectLearning }: { courses: Course[]; 
   );
 }
 
-function LearningWorkspace({ token, courses, course, video, onSelectLearning, onProgressSaved, onToast }: { token: string; courses: Course[]; course: Course; video: CourseVideo; onSelectLearning: (courseId: string, videoId?: string) => void; onProgressSaved: () => void; onToast: (toast: ToastState) => void }) {
+function LearningWorkspace({ token, courses, course, video, onSelectLearning, onProgressSaved, onToast }: { token: string; courses: Course[]; course: Course; video: CourseVideo; onSelectLearning: (courseId: string, videoId?: string) => void; onProgressSaved: ProgressSavedHandler; onToast: (toast: ToastState) => void }) {
   return (
     <div className="grid gap-4 xl:grid-cols-[320px_minmax(0,1fr)]">
       <Card>
@@ -569,44 +574,121 @@ function LearningWorkspace({ token, courses, course, video, onSelectLearning, on
   );
 }
 
-function LearningPanel({ token, course, video, onProgressSaved, onToast }: { token: string; course: Course; video: CourseVideo; onProgressSaved: () => void; onToast: (toast: ToastState) => void }) {
+function LearningPanel({ token, course, video, onProgressSaved, onToast }: { token: string; course: Course; video: CourseVideo; onProgressSaved: ProgressSavedHandler; onToast: (toast: ToastState) => void }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const lastSavedRef = useRef(0);
+  const handledInteractionsRef = useRef<Set<string>>(new Set());
+  const blockingPopupRef = useRef(false);
   const [activeInteraction, setActiveInteraction] = useState<H5PInteraction | null>(null);
-  const [answeredInteractions, setAnsweredInteractions] = useState<Set<string>>(new Set());
+  const [localProgress, setLocalProgress] = useState(video.progress);
 
-  useEffect(() => { setAnsweredInteractions(new Set()); lastSavedRef.current = 0; }, [video.id]);
+  useEffect(() => { handledInteractionsRef.current = new Set(); blockingPopupRef.current = false; setActiveInteraction(null); setLocalProgress(video.progress); }, [video.id]);
+  useEffect(() => {
+    setLocalProgress((current) => ({
+      percent: Math.max(current.percent, video.progress.percent),
+      completed: current.completed || video.progress.completed,
+      watchedSeconds: Math.max(current.watchedSeconds, video.progress.watchedSeconds),
+      lastPositionSeconds: Math.max(current.lastPositionSeconds, video.progress.lastPositionSeconds)
+    }));
+  }, [video.progress.completed, video.progress.lastPositionSeconds, video.progress.percent, video.progress.watchedSeconds]);
+  useEffect(() => { if (activeInteraction) { blockingPopupRef.current = true; videoRef.current?.pause(); } }, [activeInteraction]);
 
-  async function saveProgress(completed = false) {
+  function getPlaybackProgress(element: HTMLVideoElement, completed = false) {
+    if (!Number.isFinite(element.duration) || element.duration <= 0) return null;
+    const percent = Math.min(100, Math.max(video.progress.percent, localProgress.percent, (element.currentTime / element.duration) * 100));
+
+    return {
+      percent,
+      completed: completed || video.progress.completed || localProgress.completed || percent >= 95,
+      watchedSeconds: Math.max(video.progress.watchedSeconds, localProgress.watchedSeconds, element.currentTime),
+      lastPositionSeconds: element.currentTime
+    };
+  }
+
+  function syncLocalProgress(element: HTMLVideoElement, completed = false, updateVisibleProgress = true) {
+    const progress = getPlaybackProgress(element, completed);
+    if (!progress) return null;
+
+    if (updateVisibleProgress) {
+      setLocalProgress((current) => ({
+        percent: Math.max(current.percent, progress.percent),
+        completed: current.completed || progress.completed,
+        watchedSeconds: Math.max(current.watchedSeconds, progress.watchedSeconds),
+        lastPositionSeconds: progress.lastPositionSeconds
+      }));
+    }
+
+    return progress;
+  }
+
+  async function saveProgress(completed = false, updateVisibleProgress = false) {
     const element = videoRef.current;
-    if (!element || !Number.isFinite(element.duration) || element.duration <= 0) return;
-    const percent = Math.min(100, Math.max(video.progress.percent, (element.currentTime / element.duration) * 100));
-    await api.updateProgress(token, { courseId: course.id, videoId: video.id, watchedSeconds: Math.max(video.progress.watchedSeconds, element.currentTime), lastPositionSeconds: element.currentTime, percent, completed: completed || percent >= 95 });
+    if (!element) return;
+    const progress = syncLocalProgress(element, completed, updateVisibleProgress);
+    if (!progress) return;
+    await api.updateProgress(token, { courseId: course.id, videoId: video.id, watchedSeconds: progress.watchedSeconds, lastPositionSeconds: progress.lastPositionSeconds, percent: progress.percent, completed: progress.completed });
+  }
+
+  function markInteractionHandled(interaction: H5PInteraction) {
+    if (handledInteractionsRef.current.has(interaction.id)) return false;
+    handledInteractionsRef.current.add(interaction.id);
+    return true;
+  }
+
+  function recordInteraction(interaction: H5PInteraction, payload: Record<string, unknown>) {
+    return api.h5pEvent(token, { courseId: course.id, videoId: video.id, interactionId: interaction.id, type: interaction.type, payload: { title: interaction.title, prompt: interaction.prompt, ...payload } });
+  }
+
+  async function saveCheckpointProgress(interaction: H5PInteraction) {
+    const eventResult = recordInteraction(interaction, { reachedAt: new Date().toISOString(), mode: "transparent" }).then(() => null, (error: unknown) => error);
+
+    await saveProgress(false, true);
+    await onProgressSaved();
+
+    const eventError = await eventResult;
+    if (eventError) {
+      throw eventError;
+    }
   }
 
   function handleTimeUpdate() {
     const element = videoRef.current;
-    if (!element) return;
-    const nextInteraction = (video.h5pConfig?.interactions ?? []).find((interaction) => element.currentTime >= interaction.time && !answeredInteractions.has(interaction.id));
-    if (nextInteraction) { element.pause(); setActiveInteraction(nextInteraction); return; }
-    if (element.currentTime - lastSavedRef.current > 5) { lastSavedRef.current = element.currentTime; void saveProgress().catch((error) => onToast({ type: "error", message: error.message })); }
+    if (!element || activeInteraction) return;
+
+    const dueInteractions = [...(video.h5pConfig?.interactions ?? [])]
+      .filter((interaction) => element.currentTime >= interaction.time && !handledInteractionsRef.current.has(interaction.id))
+      .sort((first, second) => first.time - second.time);
+
+    for (const interaction of dueInteractions.filter(isCheckpointInteraction)) {
+      if (markInteractionHandled(interaction)) {
+        void saveCheckpointProgress(interaction).catch((error) => onToast({ type: "error", message: error instanceof Error ? error.message : "Checkpoint progress refresh failed" }));
+      }
+    }
+
+    const nextPopup = dueInteractions.find((interaction) => !isCheckpointInteraction(interaction));
+    if (nextPopup && markInteractionHandled(nextPopup)) { blockingPopupRef.current = true; element.pause(); setActiveInteraction(nextPopup); void saveProgress(false, true).catch((error) => onToast({ type: "error", message: error.message })); }
+  }
+
+  function handleVideoPlay() {
+    if (blockingPopupRef.current) {
+      videoRef.current?.pause();
+    }
   }
 
   async function confirmInteraction(interaction: H5PInteraction) {
-    setAnsweredInteractions((current) => new Set(current).add(interaction.id));
+    blockingPopupRef.current = false;
     setActiveInteraction(null);
-    await api.h5pEvent(token, { courseId: course.id, videoId: video.id, interactionId: interaction.id, type: interaction.type, payload: { title: interaction.title, prompt: interaction.prompt, answeredAt: new Date().toISOString() } });
+    await recordInteraction(interaction, { confirmedAt: new Date().toISOString(), mode: "confirmed" });
     await videoRef.current?.play().catch(() => undefined);
   }
 
   return (
     <div className="overflow-hidden rounded-lg border bg-white shadow-panel">
-      <div className="bg-slate-950"><video key={video.id} ref={videoRef} className="aspect-video w-full bg-slate-950 object-contain" controls src={resolveMediaUrl(video.sourceUrl)} onTimeUpdate={handleTimeUpdate} onEnded={() => { void saveProgress(true).then(onProgressSaved).then(() => onToast({ type: "success", message: "Video completed" })).catch((error) => onToast({ type: "error", message: error.message })); }} /></div>
+      <div className="bg-slate-950"><video key={video.id} ref={videoRef} className="aspect-video w-full bg-slate-950 object-contain" controls controlsList="nodownload" disablePictureInPicture src={resolveMediaUrl(video.sourceUrl)} onPlay={handleVideoPlay} onTimeUpdate={handleTimeUpdate} onEnded={() => { void saveProgress(true, true).then(onProgressSaved).then(() => onToast({ type: "success", message: "Video completed" })).catch((error) => onToast({ type: "error", message: error.message })); }} /></div>
       <div className="grid gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_220px]">
         <div><p className="text-sm font-medium text-primary">{course.title}</p><h2 className="mt-1 text-2xl font-semibold leading-8">{video.title}</h2><p className="mt-2 text-sm leading-6 text-muted-foreground">{video.description}</p></div>
-        <div className="rounded-md border bg-muted/40 p-3"><div className="flex items-center justify-between text-sm"><span>Progress</span><strong>{formatPercent(video.progress.percent)}</strong></div><div className="mt-2 h-2 rounded-full bg-white"><div className="h-2 rounded-full bg-primary" style={{ width: `${video.progress.percent}%` }} /></div><div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground"><FileVideo className="h-4 w-4" aria-hidden="true" />{video.h5pConfig?.interactions?.length ?? 0} H5P interactions</div></div>
+        <div className="rounded-md border bg-muted/40 p-3"><div className="flex items-center justify-between text-sm"><span>Progress</span><strong>{formatPercent(localProgress.percent)}</strong></div><div className="mt-2 h-2 rounded-full bg-white"><div className="h-2 rounded-full bg-primary" style={{ width: `${localProgress.percent}%` }} /></div><div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground"><FileVideo className="h-4 w-4" aria-hidden="true" />{video.h5pConfig?.interactions?.length ?? 0} H5P interactions</div></div>
       </div>
-      {activeInteraction && <div className="fixed inset-0 z-40 grid place-items-center bg-slate-950/60 p-4"><div className="w-full max-w-md rounded-lg border bg-white p-5 shadow-panel"><h3 className="text-lg font-semibold">{activeInteraction.title}</h3><p className="mt-2 text-sm leading-6 text-muted-foreground">{activeInteraction.prompt}</p><div className="mt-5 flex justify-end"><Button onClick={() => void confirmInteraction(activeInteraction)}><Check className="h-4 w-4" aria-hidden="true" />Confirm</Button></div></div></div>}
+      {activeInteraction && <div className="fixed inset-0 z-40 grid place-items-center bg-slate-950/60 p-4"><div className="w-full max-w-md rounded-lg border bg-white p-5 shadow-panel"><h3 className="text-lg font-semibold">{activeInteraction.title}</h3><p className="mt-2 text-sm leading-6 text-muted-foreground">{activeInteraction.prompt}</p><div className="mt-5 flex justify-end"><Button onClick={() => void confirmInteraction(activeInteraction).catch((error) => onToast({ type: "error", message: error.message }))}><Check className="h-4 w-4" aria-hidden="true" />Confirm</Button></div></div></div>}
     </div>
   );
 }
@@ -751,7 +833,7 @@ function H5PEditor({ video, onSave }: { video: DirectoryVideo; onSave: (interact
   const [interactions, setInteractions] = useState<H5PInteraction[]>(video.h5pConfig?.interactions ?? []);
   useEffect(() => { setInteractions(video.h5pConfig?.interactions ?? []); }, [video.id, video.h5pConfig]);
   function updateInteraction(index: number, patch: Partial<H5PInteraction>) { setInteractions((current) => current.map((interaction, position) => (position === index ? { ...interaction, ...patch } : interaction))); }
-  return <Card><CardHeader><div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"><div><CardTitle>{video.title}</CardTitle><p className="mt-1 text-sm text-muted-foreground">Configure multiple checkpoints and popups for this video.</p></div><Button variant="outline" onClick={() => setInteractions((current) => [...current, { id: crypto.randomUUID(), time: 0, type: "popup", title: "New checkpoint", prompt: "Confirm the key point before continuing." }])}><Plus className="h-4 w-4" aria-hidden="true" />Add checkpoint</Button></div></CardHeader><CardContent className="space-y-3">{interactions.map((interaction, index) => <div key={interaction.id} className="rounded-md border bg-white p-3"><div className="grid gap-3 md:grid-cols-[120px_1fr_1fr]"><label className="text-sm font-medium">Time<input className="field mt-1" type="number" min="0" value={interaction.time} onChange={(event) => updateInteraction(index, { time: Number(event.target.value) })} /></label><label className="text-sm font-medium">Title<input className="field mt-1" value={interaction.title} onChange={(event) => updateInteraction(index, { title: event.target.value })} /></label><label className="text-sm font-medium">Type<select className="field mt-1" value={interaction.type} onChange={(event) => updateInteraction(index, { type: event.target.value })}><option value="popup">Popup</option><option value="checkpoint">Checkpoint</option></select></label></div><label className="mt-3 block text-sm font-medium">Prompt<textarea className="textarea-field mt-1" value={interaction.prompt} onChange={(event) => updateInteraction(index, { prompt: event.target.value })} /></label><div className="mt-3 flex justify-end"><Button variant="ghost" size="sm" onClick={() => setInteractions((current) => current.filter((_, position) => position !== index))}>Remove</Button></div></div>)}{interactions.length === 0 && <EmptyInline title="No H5P interactions" description="Add one or more checkpoints to pause the video and collect learner acknowledgements." />}<Button onClick={() => onSave(interactions)}><Save className="h-4 w-4" aria-hidden="true" />Save H5P configuration</Button></CardContent></Card>;
+  return <Card><CardHeader><div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"><div><CardTitle>{video.title}</CardTitle><p className="mt-1 text-sm text-muted-foreground">Configure multiple checkpoints and popups for this video.</p></div><Button variant="outline" onClick={() => setInteractions((current) => [...current, { id: crypto.randomUUID(), time: 0, type: "checkpoint", title: "New checkpoint", prompt: "Record that the learner reached this point." }])}><Plus className="h-4 w-4" aria-hidden="true" />Add checkpoint</Button></div></CardHeader><CardContent className="space-y-3">{interactions.map((interaction, index) => <div key={interaction.id} className="rounded-md border bg-white p-3"><div className="grid gap-3 md:grid-cols-[120px_1fr_1fr]"><label className="text-sm font-medium">Time<input className="field mt-1" type="number" min="0" value={interaction.time} onChange={(event) => updateInteraction(index, { time: Number(event.target.value) })} /></label><label className="text-sm font-medium">Title<input className="field mt-1" value={interaction.title} onChange={(event) => updateInteraction(index, { title: event.target.value })} /></label><label className="text-sm font-medium">Type<select className="field mt-1" value={interaction.type} onChange={(event) => updateInteraction(index, { type: event.target.value })}><option value="popup">Popup</option><option value="checkpoint">Checkpoint</option></select></label></div><label className="mt-3 block text-sm font-medium">Prompt<textarea className="textarea-field mt-1" value={interaction.prompt} onChange={(event) => updateInteraction(index, { prompt: event.target.value })} /></label><div className="mt-3 flex justify-end"><Button variant="ghost" size="sm" onClick={() => setInteractions((current) => current.filter((_, position) => position !== index))}>Remove</Button></div></div>)}{interactions.length === 0 && <EmptyInline title="No H5P interactions" description="Add checkpoints for transparent tracking or popups for learner confirmation." />}<Button onClick={() => onSave(interactions)}><Save className="h-4 w-4" aria-hidden="true" />Save H5P configuration</Button></CardContent></Card>;
 }
 
 function GroupManagementPage({ token, directory, onRunAction }: { token: string; directory: DirectoryData; onRunAction: (action: () => Promise<unknown>, message: string) => Promise<void> }) {

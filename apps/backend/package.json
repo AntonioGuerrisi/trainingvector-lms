@@ -1,6 +1,6 @@
 {
   "name": "@lms/backend",
-  "version": "0.3.2+9",
+  "version": "0.3.7+14",
   "private": true,
   "type": "module",
   "scripts": {

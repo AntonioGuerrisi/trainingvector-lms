@@ -1,6 +1,12 @@
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { config } from "dotenv";
 import { z } from "zod";
 
+const configDir = path.dirname(fileURLToPath(import.meta.url));
+
+config({ path: path.resolve(configDir, "../../../../.env") });
+config({ path: path.resolve(configDir, "../../.env") });
 config();
 
 const envSchema = z.object({
@@ -14,3 +20,11 @@ const envSchema = z.object({
 });
 
 export const env = envSchema.parse(process.env);
+
+process.env.NODE_ENV = env.NODE_ENV;
+process.env.PORT = String(env.PORT);
+process.env.DATABASE_URL = env.DATABASE_URL;
+process.env.REDIS_URL = env.REDIS_URL;
+process.env.JWT_SECRET = env.JWT_SECRET;
+process.env.CORS_ORIGIN = env.CORS_ORIGIN;
+process.env.UPLOAD_DIR = env.UPLOAD_DIR;
