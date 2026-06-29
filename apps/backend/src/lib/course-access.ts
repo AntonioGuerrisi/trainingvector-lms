@@ -1,5 +1,6 @@
 import type { Course, CourseVideo, Role, Video, VideoProgress } from "@prisma/client";
 import type { AuthUser } from "./auth.js";
+import { getCompletedInteractionIds, getRequiredInteractionCompletion, type H5PEventReference } from "./h5p-progress.js";
 import { HttpError } from "./http.js";
 import { prisma } from "./prisma.js";
 
@@ -72,15 +73,25 @@ export async function getProgressForCourse(userId: string, courseId: string) {
   return prisma.videoProgress.findMany({ where: { userId, courseId } });
 }
 
-export function serializeCourse(course: CourseWithVideos, progressRows: VideoProgress[], role: Role) {
+export async function getH5PEventsForCourse(userId: string, courseId: string) {
+  return prisma.h5PEvent.findMany({
+    where: { userId, courseId },
+    select: { videoId: true, courseId: true, interactionId: true }
+  });
+}
+
+export function serializeCourse(course: CourseWithVideos, progressRows: VideoProgress[], h5pEvents: H5PEventReference[], role: Role) {
   const progressByVideo = new Map(progressRows.map((progress) => [progress.videoId, progress]));
   let previousCompleted = true;
 
   const videos = course.videos.map((entry, index) => {
     const progress = progressByVideo.get(entry.videoId);
+    const interactionCompletion = getRequiredInteractionCompletion(entry.video.h5pConfig, getCompletedInteractionIds(h5pEvents, entry.videoId, course.id));
+    const effectivePercent = interactionCompletion?.percent ?? progress?.percent ?? 0;
+    const effectiveCompleted = Boolean(progress?.completed && (interactionCompletion?.completed ?? true));
     const locked = !isPrivileged(role) && entry.gatePrevious && index > 0 && !previousCompleted;
 
-    previousCompleted = Boolean(progress?.completed);
+    previousCompleted = effectiveCompleted;
 
     return {
       id: entry.video.id,
@@ -94,8 +105,8 @@ export function serializeCourse(course: CourseWithVideos, progressRows: VideoPro
       locked,
       progress: progress
         ? {
-            percent: progress.percent,
-            completed: progress.completed,
+            percent: effectivePercent,
+            completed: effectiveCompleted,
             watchedSeconds: progress.watchedSeconds,
             lastPositionSeconds: progress.lastPositionSeconds
           }
@@ -153,7 +164,8 @@ export async function assertVideoUnlocked(user: AuthUser, courseId: string | und
 
   const course = await getCourseOrThrow(courseId);
   const progress = await getProgressForCourse(user.id, courseId);
-  const payload = serializeCourse(course, progress, user.role);
+  const h5pEvents = await getH5PEventsForCourse(user.id, courseId);
+  const payload = serializeCourse(course, progress, h5pEvents, user.role);
   const video = payload.videos.find((entry) => entry.id === videoId);
 
   if (!video) {

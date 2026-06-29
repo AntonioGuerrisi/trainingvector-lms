@@ -1,4 +1,4 @@
-import type { Course, CourseProgressReport, DirectoryData, DirectoryVideo, H5PConfig, ProgressReportRow, ReportOverview, Role, User } from "../types";
+import type { Course, CourseProgressReport, DirectoryData, DirectoryVideo, H5PConfig, ProgressReportRow, ReportOverview, Role, User, VideoProgress } from "../types";
 
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:4000";
 
@@ -61,7 +61,7 @@ export const api = {
     token: string,
     payload: { courseId: string; videoId: string; watchedSeconds: number; lastPositionSeconds: number; percent: number; completed?: boolean }
   ) {
-    return request<{ progress: unknown }>("/api/progress/video", {
+    return request<{ progress: VideoProgress }>("/api/progress/video", {
       method: "POST",
       token,
       body: payload

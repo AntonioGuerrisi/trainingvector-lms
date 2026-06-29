@@ -2,6 +2,7 @@ import { Router } from "express";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { assertVideoUnlocked } from "../lib/course-access.js";
+import { getCompletedInteractionIds, getRequiredInteractionCompletion } from "../lib/h5p-progress.js";
 import { asyncHandler } from "../lib/http.js";
 import { invalidateReports } from "../lib/redis.js";
 import { prisma } from "../lib/prisma.js";
@@ -38,16 +39,34 @@ router.post(
 
     const courseId = input.courseId?.startsWith("standalone:") ? null : input.courseId ?? null;
 
-    const completed = input.completed ?? input.percent >= 95;
+    const video = await prisma.video.findUnique({
+      where: { id: input.videoId },
+      select: { durationSeconds: true, h5pConfig: true }
+    });
 
+    const h5pEvents = await prisma.h5PEvent.findMany({
+      where: { userId: req.user.id, videoId: input.videoId, courseId },
+      select: { videoId: true, courseId: true, interactionId: true }
+    });
+    const completedInteractionIds = getCompletedInteractionIds(h5pEvents, input.videoId, courseId);
+    const interactionCompletion = getRequiredInteractionCompletion(video?.h5pConfig ?? null, completedInteractionIds);
+    const hasCompletedRequiredInteractions = interactionCompletion?.completed ?? true;
+    const requestedCompleted = input.completed ?? input.percent >= 95;
+    const completed = requestedCompleted && hasCompletedRequiredInteractions;
     const existingProgress = await prisma.videoProgress.findFirst({
       where: { userId: req.user.id, videoId: input.videoId, courseId }
     });
 
+    const interactionCappedPercent = interactionCompletion?.percent ?? input.percent;
+    const percent = hasCompletedRequiredInteractions && !interactionCompletion ? Math.max(existingProgress?.percent ?? 0, interactionCappedPercent) : interactionCappedPercent;
+    const interactionCappedWatchedSeconds = !hasCompletedRequiredInteractions && video?.durationSeconds
+      ? Math.min(input.watchedSeconds, (video.durationSeconds * percent) / 100)
+      : input.watchedSeconds;
+
     const data = {
-      watchedSeconds: input.watchedSeconds,
+      watchedSeconds: hasCompletedRequiredInteractions ? Math.max(existingProgress?.watchedSeconds ?? 0, interactionCappedWatchedSeconds) : interactionCappedWatchedSeconds,
       lastPositionSeconds: input.lastPositionSeconds,
-      percent: input.percent,
+      percent,
       completed,
       completedAt: completed ? new Date() : null
     };

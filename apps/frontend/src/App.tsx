@@ -35,7 +35,7 @@ import type { Course, CourseVideo, DirectoryData, DirectoryUser, DirectoryVideo,
 import { Button } from "./components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./components/ui/card";
 
-type ToastState = { type: "success" | "error"; message: string } | null;
+type ToastState = { type: "success" | "error" | "info"; message: string } | null;
 type ProgressSavedHandler = () => void | Promise<void>;
 type PageId = "dashboard" | "catalog" | "videos" | "learning" | "users" | "groups" | "courses" | "progress" | "reports" | "settings";
 type IconComponent = typeof Home;
@@ -620,10 +620,12 @@ function LearningPanel({ token, course, video, onProgressSaved, onToast }: { tok
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const handledInteractionsRef = useRef<Set<string>>(new Set());
   const blockingPopupRef = useRef(false);
+  const lastPlaybackTimeRef = useRef<number | null>(null);
+  const isSeekingRef = useRef(false);
   const [activeInteraction, setActiveInteraction] = useState<H5PInteraction | null>(null);
   const [localProgress, setLocalProgress] = useState(video.progress);
 
-  useEffect(() => { handledInteractionsRef.current = new Set(); blockingPopupRef.current = false; setActiveInteraction(null); setLocalProgress(video.progress); }, [video.id]);
+  useEffect(() => { handledInteractionsRef.current = new Set(); blockingPopupRef.current = false; lastPlaybackTimeRef.current = null; isSeekingRef.current = false; setActiveInteraction(null); setLocalProgress(video.progress); }, [video.id]);
   useEffect(() => {
     setLocalProgress((current) => ({
       percent: Math.max(current.percent, video.progress.percent),
@@ -640,7 +642,7 @@ function LearningPanel({ token, course, video, onProgressSaved, onToast }: { tok
 
     return {
       percent,
-      completed: completed || video.progress.completed || localProgress.completed || percent >= 95,
+      completed: completed || video.progress.completed || localProgress.completed,
       watchedSeconds: Math.max(video.progress.watchedSeconds, localProgress.watchedSeconds, element.currentTime),
       lastPositionSeconds: element.currentTime
     };
@@ -667,7 +669,9 @@ function LearningPanel({ token, course, video, onProgressSaved, onToast }: { tok
     if (!element) return;
     const progress = syncLocalProgress(element, completed, updateVisibleProgress);
     if (!progress) return;
-    await api.updateProgress(token, { courseId: course.id, videoId: video.id, watchedSeconds: progress.watchedSeconds, lastPositionSeconds: progress.lastPositionSeconds, percent: progress.percent, completed: progress.completed });
+    const result = await api.updateProgress(token, { courseId: course.id, videoId: video.id, watchedSeconds: progress.watchedSeconds, lastPositionSeconds: progress.lastPositionSeconds, percent: progress.percent, completed: progress.completed });
+    setLocalProgress({ percent: result.progress.percent, completed: result.progress.completed, watchedSeconds: result.progress.watchedSeconds, lastPositionSeconds: result.progress.lastPositionSeconds });
+    return result.progress;
   }
 
   function markInteractionHandled(interaction: H5PInteraction) {
@@ -681,28 +685,40 @@ function LearningPanel({ token, course, video, onProgressSaved, onToast }: { tok
   }
 
   async function saveCheckpointProgress(interaction: H5PInteraction) {
-    const eventResult = recordInteraction(interaction, { reachedAt: new Date().toISOString(), mode: "transparent" }).then(() => null, (error: unknown) => error);
-
+    await recordInteraction(interaction, { reachedAt: new Date().toISOString(), mode: "transparent" });
     await saveProgress(false, true);
     await onProgressSaved();
+  }
 
-    const eventError = await eventResult;
-    if (eventError) {
-      throw eventError;
+  function getContinuousPlaybackWindow(element: HTMLVideoElement) {
+    const currentTime = element.currentTime;
+    const previousTime = lastPlaybackTimeRef.current;
+    lastPlaybackTimeRef.current = currentTime;
+
+    if (previousTime === null || isSeekingRef.current || element.seeking || currentTime < previousTime) {
+      return null;
     }
+
+    if (currentTime - previousTime > 3) {
+      return null;
+    }
+
+    return { start: previousTime, end: currentTime };
   }
 
   function handleTimeUpdate() {
     const element = videoRef.current;
     if (!element || activeInteraction) return;
+    const playbackWindow = getContinuousPlaybackWindow(element);
+    if (!playbackWindow) return;
 
     const dueInteractions = [...(video.h5pConfig?.interactions ?? [])]
-      .filter((interaction) => element.currentTime >= interaction.time && !handledInteractionsRef.current.has(interaction.id))
+      .filter((interaction) => (interaction.time === 0 ? playbackWindow.start <= 0 : interaction.time > playbackWindow.start) && interaction.time <= playbackWindow.end && !handledInteractionsRef.current.has(interaction.id))
       .sort((first, second) => first.time - second.time);
 
     for (const interaction of dueInteractions.filter(isCheckpointInteraction)) {
       if (markInteractionHandled(interaction)) {
-        void saveCheckpointProgress(interaction).catch((error) => onToast({ type: "error", message: error instanceof Error ? error.message : "Checkpoint progress refresh failed" }));
+        void saveCheckpointProgress(interaction).catch((error) => { handledInteractionsRef.current.delete(interaction.id); onToast({ type: "error", message: error instanceof Error ? error.message : "Checkpoint progress refresh failed" }); });
       }
     }
 
@@ -711,9 +727,23 @@ function LearningPanel({ token, course, video, onProgressSaved, onToast }: { tok
   }
 
   function handleVideoPlay() {
+    if (videoRef.current && lastPlaybackTimeRef.current === null) {
+      lastPlaybackTimeRef.current = videoRef.current.currentTime;
+    }
+
     if (blockingPopupRef.current) {
       videoRef.current?.pause();
     }
+  }
+
+  function handleVideoSeeking() {
+    isSeekingRef.current = true;
+  }
+
+  function handleVideoSeeked() {
+    const element = videoRef.current;
+    lastPlaybackTimeRef.current = element?.currentTime ?? null;
+    isSeekingRef.current = false;
   }
 
   async function confirmInteraction(interaction: H5PInteraction) {
@@ -725,7 +755,7 @@ function LearningPanel({ token, course, video, onProgressSaved, onToast }: { tok
 
   return (
     <div className="overflow-hidden rounded-lg border bg-white shadow-panel">
-      <div className="bg-slate-950"><video key={video.id} ref={videoRef} className="aspect-video w-full bg-slate-950 object-contain" controls controlsList="nodownload" disablePictureInPicture src={resolveMediaUrl(video.sourceUrl)} onPlay={handleVideoPlay} onTimeUpdate={handleTimeUpdate} onEnded={() => { void saveProgress(true, true).then(onProgressSaved).then(() => onToast({ type: "success", message: "Video completed" })).catch((error) => onToast({ type: "error", message: error.message })); }} /></div>
+      <div className="bg-slate-950"><video key={video.id} ref={videoRef} className="aspect-video w-full bg-slate-950 object-contain" controls controlsList="nodownload" disablePictureInPicture src={resolveMediaUrl(video.sourceUrl)} onPlay={handleVideoPlay} onSeeking={handleVideoSeeking} onSeeked={handleVideoSeeked} onTimeUpdate={handleTimeUpdate} onEnded={() => { void saveProgress(true, false).then(async (progress) => { await onProgressSaved(); onToast({ type: progress?.completed ? "success" : "info", message: progress?.completed ? "Video completed" : "Progress saved. Required checkpoints are still pending." }); }).catch((error) => onToast({ type: "error", message: error.message })); }} /></div>
       <div className="grid gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_220px]">
         <div><p className="text-sm font-medium text-primary">{course.title}</p><h2 className="mt-1 text-2xl font-semibold leading-8">{video.title}</h2><p className="mt-2 text-sm leading-6 text-muted-foreground">{video.description}</p></div>
         <div className="rounded-md border bg-muted/40 p-3"><div className="flex items-center justify-between text-sm"><span>Progress</span><strong>{formatPercent(localProgress.percent)}</strong></div><div className="mt-2 h-2 rounded-full bg-white"><div className="h-2 rounded-full bg-primary" style={{ width: `${localProgress.percent}%` }} /></div><div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground"><FileVideo className="h-4 w-4" aria-hidden="true" />{video.h5pConfig?.interactions?.length ?? 0} H5P interactions</div></div>
