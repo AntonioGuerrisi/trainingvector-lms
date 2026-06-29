@@ -47,11 +47,11 @@ type NavItem = {
   icon: IconComponent;
 };
 
-const demoAccounts = [
-  { label: "Admin", email: "admin@lms.local", password: "admin123" },
-  { label: "Professor", email: "professor@lms.local", password: "professor123" },
-  { label: "Student", email: "student@lms.local", password: "student123" }
-];
+const demoAccounts = [ 
+    { label: "Admin", email: "admin@lms.local", password: "admin123" },
+    { label: "Professor", email: "professor@lms.local", password: "professor123" },
+    { label: "Student", email: "student@lms.local", password: "student123" }
+  ];
 
 const roleOptions: Role[] = ["STUDENT", "PROFESSOR", "ADMIN"];
 
@@ -439,7 +439,7 @@ function LoginView({ onLogin, loading, toast }: { onLogin: (email: string, passw
             </Button>
           </form>
           <div className="mt-4 grid grid-cols-3 gap-2">
-            {demoAccounts.map((account) => (
+            {import.meta.env.DEV && demoAccounts.map((account) => (
               <Button key={account.email} variant="outline" size="sm" onClick={() => { setEmail(account.email); setPassword(account.password); }}>
                 {account.label}
               </Button>

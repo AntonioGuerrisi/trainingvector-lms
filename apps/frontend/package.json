@@ -1,6 +1,6 @@
 {
   "name": "@lms/frontend",
-  "version": "0.7.1+19",
+  "version": "0.7.2+20",
   "private": true,
   "type": "module",
   "scripts": {
